@@ -1,0 +1,48 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "DAC – Dynamic Alarm Clock",
+        "description": "Berechnet deine Weckzeit automatisch aus dem Arbeitsbeginn (Arbeitsbeginn minus Offset) – inkl. Urlaub/Feiertag-Logik und täglicher Erinnerung.",
+        "data": {
+          "default_alarm_time": "Standard-Weckzeit (Fallback, wenn keine Arbeitszeit gesetzt wurde)",
+          "offset_minutes": "Offset: Minuten VOR dem Arbeitsbeginn geweckt werden",
+          "reminder_time": "Tägliche Erinnerung um (Status-Check, ob Arbeitszeit gesetzt wurde)",
+          "reminder_text": "Erinnerungstext ({alarm_time} wird ersetzt)",
+          "notifier": "Ziel-Benachrichtigungsdienst (notify.*)",
+          "alarm_lights": "Weck-Lichter (optional)",
+          "media_players": "Weck-Media-Player (optional)",
+          "vacation_calendars": "Externe Urlaubs-/Feiertagskalender (optional)",
+          "alarm_volume": "Weck-Lautstärke (0.0–1.0)"
+        }
+      }
+    },
+    "error": {
+      "invalid_input": "Ungültige Eingabe, bitte prüfen."
+    },
+    "abort": {
+      "already_configured": "DAC ist bereits eingerichtet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "DAC – Optionen",
+        "data": {
+          "default_alarm_time": "Standard-Weckzeit (Fallback, wenn keine Arbeitszeit gesetzt wurde)",
+          "offset_minutes": "Offset: Minuten VOR dem Arbeitsbeginn geweckt werden",
+          "reminder_time": "Tägliche Erinnerung um (Status-Check, ob Arbeitszeit gesetzt wurde)",
+          "reminder_text": "Erinnerungstext ({alarm_time} wird ersetzt)",
+          "notifier": "Ziel-Benachrichtigungsdienst (notify.*)",
+          "alarm_lights": "Weck-Lichter (optional)",
+          "media_players": "Weck-Media-Player (optional)",
+          "vacation_calendars": "Externe Urlaubs-/Feiertagskalender (optional)",
+          "alarm_volume": "Weck-Lautstärke (0.0–1.0)"
+        }
+      }
+    },
+    "error": {
+      "invalid_input": "Ungültige Eingabe, bitte prüfen."
+    }
+  }
+}

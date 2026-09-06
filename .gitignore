@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Tooling / workspace
+.freebuff/
+whtmp/
+reqs.txt
+
+# OS
+.DS_Store
+Thumbs.db

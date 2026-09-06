@@ -1,0 +1,38 @@
+set_work_time:
+  name: Arbeitszeit setzen
+  description: >-
+    Setzt den Arbeitsbeginn und berechnet daraus automatisch die Weckzeit
+    (Arbeitsbeginn minus Offset). Auch für NFC-Tags geeignet.
+  fields:
+    time:
+      name: Arbeitsbeginn
+      description: Arbeitsbeginn als Zeit, z. B. "08:00"
+      required: true
+      example: "08:00"
+      selector:
+        time:
+    day:
+      name: Tag
+      description: ">"
+      selector:
+        text:
+    clear:
+      name: Zurücksetzen
+      description: Setzt die manuelle Arbeitszeit zurück (Fallback greift wieder).
+      default: false
+      selector:
+        boolean:
+
+stop_alarm:
+  name: Wecker stoppen
+  description: Stoppt die laufende Weck-Schleife (Licht + Media-Player).
+
+dismiss_for_today:
+  name: Für heute deaktivieren
+  description: Deaktiviert den Wecker für den aktuellen bzw. kommenden Tag.
+  fields:
+    day:
+      name: Tag
+      description: Optionales Datum (ISO), das deaktiviert werden soll.
+      selector:
+        text:
