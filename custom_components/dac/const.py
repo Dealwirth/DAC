@@ -58,3 +58,28 @@ STORAGE_VERSION: Final = 1
 ATTR_TIME: Final = "time"
 ATTR_DAY: Final = "day"
 ATTR_CLEAR: Final = "clear"
+
+# --- Alexa device-alarm integration -----------------------------------------
+# Optional: DAC legt zusätzlich einen "echten" Wecker auf dem Echo-Gerät an
+# (Text-Befehl an Alexa). Dadurch klingelt der Wecker auch, wenn Home
+# Assistant gerade nicht erreichbar ist.
+CONF_ALEXA_ENABLED: Final = "alexa_enabled"            # bool, default False
+CONF_ALEXA_MEDIA_PLAYER: Final = "alexa_media_player"   # alexa_media entity
+CONF_ALEXA_TEXT_HELPER: Final = "alexa_text_helper"     # input_text with the set alarm
+CONF_ALEXA_ENABLED_BOOLEAN: Final = "alexa_enabled_boolean"  # input_boolean gate
+CONF_PRE_ALARM_MINUTES: Final = "pre_alarm_minutes"     # device alarm rings N min before
+
+DEFAULT_ALEXA_ENABLED: Final = False
+DEFAULT_ALEXA_TEXT_HELPER: Final = "input_text.gestellter_alexa_wecker"
+DEFAULT_ALEXA_ENABLED_BOOLEAN: Final = "input_boolean.wecker_aktiv"
+DEFAULT_PRE_ALARM_MINUTES: Final = 2
+
+# Text commands for Alexa – the AM/PM suffix ("morgens"/"abends") prevents
+# Alexa from asking back for the time of day.
+ALEXA_SET_TEXT: Final = "stelle einen Wecker auf {time} Uhr {tod}"
+ALEXA_CLEAR_TEXT: Final = "lösche den Wecker um {time} Uhr"
+
+# --- Services (Alexa) -------------------------------------------------------
+SERVICE_SET_ALEXA_ALARM: Final = "set_alexa_alarm"
+SERVICE_CLEAR_ALEXA_ALARM: Final = "clear_alexa_alarm"
+SERVICE_CLEAR_ALEXA_ALARM: Final = "clear_alexa_alarm"

@@ -95,6 +95,7 @@ class DacPanel extends HTMLElement {
             <div class="target-sub">${targetStr}${countdown ? ` · in ${countdown}` : ""}</div>
           </div>
           ${ringing ? `<button class="btn big stop" id="stop">⛔ WECKER STOPPEN</button>` : ""}
+          ${_alexaLine(e)}
         </div>
 
         <div class="card">
@@ -215,6 +216,16 @@ function _modeLabel(mode) {
   return { standard: "Standard", dismissed: "Heute aus", vacation: "Urlaub" }[mode] || mode;
 }
 
+function _alexaLine(e) {
+  const alexa = e.alexa || {};
+  if (!alexa.enabled) return "";
+  const parts = [];
+  parts.push(alexa.stored_alarm ? `🔊 Alexa-Wecker: ${alexa.stored_alarm} Uhr` : "Kein Alexa-Wecker gesetzt");
+  if (alexa.helper_ok === false) parts.push("⚠ input_text.gestellter_alexa_wecker fehlt");
+  if (alexa.gate_ok === false) parts.push("⚠ input_boolean.wecker_aktiv fehlt");
+  return `<div class="hint alexa">${parts.map(_esc).join(" · ")}</div>`;
+}
+
 function _clockNow() {
   return new Date().toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
 }
@@ -292,6 +303,7 @@ const STYLES = `
   .btn.wide { width: 100%; margin-top: 10px; }
   .modes { display: flex; gap: 8px; flex-wrap: wrap; }
   .hint { font-size: 13px; opacity: .7; margin-top: 10px; }
+  .hint.alexa { color: var(--warning-color, #ffa726); opacity: 1; }
   .events { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
   .event { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 14px; }
   .event-date { opacity: .6; font-size: 12px; }

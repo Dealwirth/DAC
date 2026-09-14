@@ -51,6 +51,7 @@ class DacApiView(HomeAssistantView):
                 call = _FakeCall({"time": time_value})
                 await coordinator._async_set_work_time_impl(call)
                 await coordinator.async_save_state()
+                await coordinator.alexa.async_sync()
             elif action == "stop":
                 await coordinator.async_stop_alarm(_FakeCall({}))
             elif action == "dismiss":
@@ -146,6 +147,7 @@ async def _entry_payload(hass: HomeAssistant, coordinator: DacCoordinator) -> di
         "mode": data.get("mode"),
         "vacation": data.get("vacation"),
         "work_time": data.get("work_time"),
+        "alexa": _alexa_payload(coordinator),
         "work_time_day": data.get("work_time_day"),
         "alarm_time": data.get("alarm_time"),
         "alarm_day": data.get("alarm_day"),
@@ -154,6 +156,31 @@ async def _entry_payload(hass: HomeAssistant, coordinator: DacCoordinator) -> di
         "default_alarm_time": data.get("default_alarm_time"),
         "vacation_events": calendar_events,
     }
+
+
+def _alexa_payload(coordinator: DacCoordinator) -> dict:
+    """Status of the optional Alexa device-alarm bridge."""
+    bridge = coordinator.alexa
+    player = bridge.player
+    helper_state = hass_states(coordinator.hass, bridge.helper)
+    gate_state = hass_states(coordinator.hass, bridge.gate_boolean)
+    return {
+        "enabled": bridge.enabled,
+        "player": player,
+        "player_ok": bool(player) and hass_states(coordinator.hass, player) is not None,
+        "helper": bridge.helper,
+        "helper_ok": helper_state is not None,
+        "gate": bridge.gate_boolean,
+        "gate_ok": gate_state is not None,
+        "gate_on": bool(gate_state) and gate_state.state == "on",
+        "stored_alarm": bridge.stored_alarm(),
+        "pre_alarm_minutes": bridge.pre_alarm_minutes,
+    }
+
+
+def hass_states(hass: HomeAssistant, entity_id: str):
+    """Wrapper so _alexa_payload stays easy to read."""
+    return hass.states.get(entity_id)
 
 
 async def _vacation_events(hass: HomeAssistant, days: int) -> list[dict]:

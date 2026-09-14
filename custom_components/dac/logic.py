@@ -16,6 +16,33 @@ DEFAULT_VACATION_KEYWORDS: tuple[str, ...] = (
 )
 
 
+# --- Alexa text-command helpers ---------------------------------------------
+
+
+def split_am_pm(value: time) -> str:
+    """Return 'morgens' or 'abends' for a 24h time (hour < 12 -> morgens)."""
+    return "morgens" if value.hour < 12 else "abends"
+
+
+def format_alexa_time(value: time) -> str:
+    """Format a time like '05:00' (seconds dropped) for Alexa commands."""
+    return f"{value.hour:02d}:{value.minute:02d}"
+
+
+def alexa_set_text(value: time) -> str:
+    """Full Alexa command to set an alarm, e.g. 'stelle einen Wecker auf 05:00 Uhr morgens'."""
+    from .const import ALEXA_SET_TEXT
+
+    return ALEXA_SET_TEXT.format(time=format_alexa_time(value), tod=split_am_pm(value))
+
+
+def alexa_clear_text(value: time) -> str:
+    """Full Alexa command to delete one specific alarm, e.g. 'lösche den Wecker um 06:00 Uhr'."""
+    from .const import ALEXA_CLEAR_TEXT
+
+    return ALEXA_CLEAR_TEXT.format(time=format_alexa_time(value))
+
+
 def parse_time_str(value: str | time) -> time:
     """Parse a time from a string like '06:00' / '06:00:00' (or pass through)."""
     if isinstance(value, time):

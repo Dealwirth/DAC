@@ -1,6 +1,6 @@
 # DAC – Dynamic Alarm Clock ⏰
 
-**Ein dynamisches Wecksystem für Home Assistant – als vollwertige HACS-Integration mit eigenem Dashboard (kein Lovelace).**
+**Ein dynamisches Wecksystem für Home Assistant – als vollwertige HACS-Integration mit eigenem Dashboard, eigener Lovelace-Karte und optionalen echten Echo-Alexa-Weckern.**
 
 DAC berechnet deine Weckzeit automatisch aus dem Arbeitsbeginn (z. B. per NFC-Tag gescannt),
 weckt dich mit Licht + Alexa/Echo-Media-Playern im 5-Minuten-Intervall, respektiert Urlaub
@@ -18,7 +18,9 @@ deine Arbeitszeit zu setzen.
 | **Fallback-Weckzeit** | Wurde nichts gesetzt, greift eine konfigurierbare Standard-Weckzeit (z. B. 06:00) – mit intelligenter Cutoff-Logik |
 | **Urlaub & Feiertage** | Täglicher Scan (00:01) gegen einen eigenen Urlaubskalender und/oder externe Kalender; Keywords wie *Urlaub, Feiertag, Ferien, vacation, holiday* |
 | **Reminder** | Tägliche Erinnerung (z. B. 20:30) via frei wählbarem `notify.*`-Dienst, wenn für morgen noch keine Arbeitszeit gesetzt wurde |
-| **Eigenes Dashboard** | Wecker-Panel in der Seitenleiste – **kein Lovelace-Dashboard**, pure Web-Component |
+| **Eigenes Dashboard** | Wecker-Panel in der Seitenleiste – pure Web-Component, kein Lovelace nötig |
+| **Lovelace-Karte** | `custom:dac-wecker` als Lovelace-Ressource + fertiges „DAC Wecker"-Dashboard – automatisch registriert, in JEDEM Dashboard nutzbar |
+| **Alexa-Geräte-Wecker** | Optional: echter Wecker auf dem Echo – Textbefehl mit „morgens"/„abends" (keine Rückfragen), gezieltes Löschen nur des DAC-eigenen Weckers, 2-Minuten-Vorab-Wecker im Weck-Loop |
 | **Restpersistenz** | Wecker-Zustand überlebt Neustarts; ein Wecker, der während des Klingelns „verpasst" wurde, resumed |
 | **Alles per UI** | Config-Flow + Options-Flow: Zeiten, Offset, Reminder, Notifier, Lichter, Player, Lautstärke |
 
@@ -37,13 +39,28 @@ deine Arbeitszeit zu setzen.
 
 ## 🧭 Das DAC-Dashboard
 
-Nach der Einrichtung erscheint **„DAC Wecker"** in der Seitenleiste:
+Nach der Einrichtung erscheint **„DAC Wecker"** automatisch in der Seitenleiste:
 
 - Große Uhr + Countdown bis zum Wecker
 - Arbeitsbeginn per Zeileingabe setzen/zurücksetzen
 - Modus: **Standard** / **Heute aus** / **Urlaub**
 - Urlaubstage direkt im Panel eintragen (eigener Kalender) oder löschen
 - Roter Puls-Banner + Stop-Button, wenn der Wecker gerade klingelt
+
+### 🃏 Lovelace-Karte für jedes Dashboard
+
+Zusätzlich wird automatisch eine **Lovelace-Ressource** registriert und ein
+fertiges Dashboard **„DAC Wecker"** (`/dac-wecker`) angelegt:
+
+- Karte **„DAC Wecker“** (`custom:dac-wecker`) in jedem Dashboard über den
+  Karten-Picker hinzufügen (unter *Benutzerdefinierte Karten*)
+- Die Karte zeigt Uhr, Countdown, Status, Alexa-Wecker-Status,
+  Arbeitsbeginn-Eingabe und Modus-Umschalter
+- Das Auto-Dashboard ist ein normaler Startpunkt – vollständig editierbar,
+  deine Änderungen werden nie überschrieben
+
+> Nutzt du Lovelace im YAML-Modus? Dann ergänze die Ressource manuell:
+> `url: /dac/static/dac-card.js`, `type: module`.
 
 ## ⚙️ Konfiguration (Options-Flow)
 
@@ -58,6 +75,11 @@ Nach der Einrichtung erscheint **„DAC Wecker"** in der Seitenleiste:
 | Media-Player | – | `media_player.*` (z. B. Echo), erhalten TTS + Lautstärke |
 | Urlaubs-Kalender | – | Externe Kalender für Vacation-Check (zusätzlich zum eigenen) |
 | Weck-Lautstärke | `0.5` | 0.0–1.0 |
+| Alexa-Geräte-Wecker | `aus` | Echten Wecker zusätzlich auf dem Echo stellen (alexa_media) |
+| Echo media_player | – | Welcher Echo-Player die Alexa-Befehle erhält (leer = Weck-Player) |
+| input_text-Helfer | `input_text.gestellter_alexa_wecker` | Speichert den von DAC gesetzten Alexa-Wecker |
+| input_boolean-Helfer | `input_boolean.wecker_aktiv` | Gate für den 2-Minuten-Vorab-Wecker im Weck-Loop |
+| Vorab-Wecker | `2` min | Der Echo-Wecker klingelt so viele Minuten vor der Weckzeit |
 
 ### Fallback-/Cutoff-Logik
 
@@ -113,6 +135,31 @@ data:
 
 Deaktiviert den Wecker für den Tag (z. B. spontaner freier Tag).
 
+### `dac.set_alexa_alarm` / `dac.clear_alexa_alarm`
+
+```yaml
+service: dac.set_alexa_alarm   # berechneten Wecker zusätzlich auf den Echo legen
+service: dac.clear_alexa_alarm # NUR den von DAC gesetzten Echo-Wecker löschen
+```
+
+So funktioniert der Alexa-Geräte-Wecker:
+
+1. **Stellen**: „stelle einen Wecker auf 05:00 Uhr **morgens**“ – die 24h-Zeit
+   wird automatisch um „morgens“/„abends“ ergänzt, Alexa fragt nie nach.
+2. **Gezieltes Löschen**: Gespeichert im Helfer
+   `input_text.gestellter_alexa_wecker`. Bei Tagwechsel, Zeitänderung oder
+   Deaktivierung wird exakt nur dieser Wecker gelöscht
+   („lösche den Wecker um 06:00 Uhr“) – **manuelle Alexa-Wecker bleiben unberührt**.
+3. **Weck-Loop**: Beim Klingeln schaltet DAC die Lichter und stellt alle
+   5 Minuten einen neuen **2-Minuten-Vorab-Wecker** auf dem Echo – solange
+   `input_boolean.wecker_aktiv` an ist.
+4. **Deaktivierung (Tag 4)**: Stoppt den Loop, schaltet den Helfer aus und
+   setzt den gespeicherten Wecker-Text zurück.
+
+> Einmalig nötig: die Helfer `input_text.gestellter_alexa_wecker` und
+> `input_boolean.wecker_aktiv` anlegen (oder eigene in den Optionen wählen)
+> und die **Alexa Media Player**-Integration installieren.
+
 ## 🧩 Entitäten
 
 | Entität | Zweck |
@@ -130,9 +177,10 @@ py -m venv .venv
 .venv/Scripts/python -m pytest tests -v
 ```
 
-34 Tests decken die komplette Weck-Logik ab: Offset-Berechnung, Mitternachts-Wrap,
+55 Tests decken die komplette Weck-Logik ab: Offset-Berechnung, Mitternachts-Wrap,
 Fallback-/Cutoff-Semantik, Weck-Loop, Dismiss, Vacation-Check, Reminder, Persistenz,
-Config-/Options-Flow und Service-Registrierung.
+Alexa-Bridge (morgens/abends, gezieltes Löschen, Vorab-Wecker),
+Lovelace-Ressourcen-/Dashboard-Registrierung, Config-/Options-Flow und Service-Registrierung.
 
 ## 📄 Lizenz
 

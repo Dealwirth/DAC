@@ -36,3 +36,29 @@ dismiss_for_today:
       description: Optionales Datum (ISO), das deaktiviert werden soll.
       selector:
         text:
+
+set_alexa_alarm:
+  name: Alexa-Wecker synchronisieren
+  description: >-
+    Stellt den berechneten DAC-Wecker zusätzlich als echten Wecker auf dem
+    Echo-Gerät (Textbefehl mit "morgens"/"abends", keine Rückfragen von
+    Alexa). Löscht vorher exakt nur den zuvor von DAC gesetzten Wecker.
+  fields:
+    time:
+      name: Weckzeit
+      description: Optionale abweichende Zeit (sonst die aktuell berechnete Weckzeit).
+      example: "06:00"
+      selector:
+        time:
+    day:
+      name: Tag
+      description: Optionales Datum (ISO).
+      selector:
+        text:
+
+clear_alexa_alarm:
+  name: Alexa-Wecker löschen (nur DAC-eigener)
+  description: >-
+    Löscht exakt nur den Wecker, den DAC selbst gesetzt hat (gespeichert im
+    Helfer input_text.gestellter_alexa_wecker). Manuell auf der Alexa
+    gestellte Wecker bleiben unberührt.

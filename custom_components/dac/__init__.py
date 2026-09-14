@@ -23,11 +23,14 @@ from .const import (
     CONF_VACATION_CALENDARS,
     DOMAIN,
     PLATFORMS,
+    SERVICE_CLEAR_ALEXA_ALARM,
     SERVICE_DISMISS_FOR_TODAY,
+    SERVICE_SET_ALEXA_ALARM,
     SERVICE_SET_WORK_TIME,
     SERVICE_STOP_ALARM,
 )
 from .coordinator import DacCoordinator
+from .dac_card import async_setup_lovelace
 from .http_api import DacApiView
 from .logic import parse_time_str
 from .panel import async_register_panel
@@ -44,11 +47,20 @@ SET_WORK_TIME_SCHEMA = vol.Schema(
 )
 DISMISS_SCHEMA = vol.Schema({vol.Optional(ATTR_DAY): str})
 STOP_SCHEMA = vol.Schema({})
+SET_ALEXA_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_TIME): vol.Any(str, cv.time),
+        vol.Optional(ATTR_DAY): str,
+    }
+)
+CLEAR_ALEXA_SCHEMA = vol.Schema({})
 
 _SERVICE_MAP = {
     SERVICE_SET_WORK_TIME: (SET_WORK_TIME_SCHEMA, SupportsResponse.NONE),
     SERVICE_STOP_ALARM: (STOP_SCHEMA, SupportsResponse.NONE),
     SERVICE_DISMISS_FOR_TODAY: (DISMISS_SCHEMA, SupportsResponse.NONE),
+    SERVICE_SET_ALEXA_ALARM: (SET_ALEXA_SCHEMA, SupportsResponse.NONE),
+    SERVICE_CLEAR_ALEXA_ALARM: (CLEAR_ALEXA_SCHEMA, SupportsResponse.NONE),
 }
 
 
@@ -56,6 +68,8 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Register the HTTP API and the custom dashboard panel (once)."""
     hass.http.register_view(DacApiView())
     await async_register_panel(hass)
+    # Lovelace card + dedicated dashboard (deferred, lovelace loads later).
+    hass.async_create_task(async_setup_lovelace(hass))
     return True
 
 
@@ -102,6 +116,10 @@ def _make_handler(hass: HomeAssistant, service: str) -> Any:
             await coordinator.async_stop_alarm(call)
         elif service == SERVICE_DISMISS_FOR_TODAY:
             await coordinator.async_dismiss_for_today(call)
+        elif service == SERVICE_SET_ALEXA_ALARM:
+            await coordinator.alexa.async_sync()
+        elif service == SERVICE_CLEAR_ALEXA_ALARM:
+            await coordinator.alexa.async_clear_own()
 
     return handler
 

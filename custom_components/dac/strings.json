@@ -13,7 +13,12 @@
           "alarm_lights": "Weck-Lichter (optional)",
           "media_players": "Weck-Media-Player (optional)",
           "vacation_calendars": "Externe Urlaubs-/Feiertagskalender (optional)",
-          "alarm_volume": "Weck-Lautstärke (0.0–1.0)"
+          "alarm_volume": "Weck-Lautstärke (0.0–1.0)",
+          "alexa_enabled": "Alexa-Geräte-Wecker (Echo) zusätzlich stellen",
+          "alexa_media_player": "Echo media_player (alexa_media) – leer = Weck-Player",
+          "alexa_text_helper": "Helfer: gesetzter Alexa-Wecker (input_text)",
+          "alexa_enabled_boolean": "Helfer: Wecker aktiv (input_boolean)",
+          "pre_alarm_minutes": "Vorab-Wecker auf dem Echo: Minuten vor der Weckzeit"
         }
       }
     },
@@ -37,7 +42,12 @@
           "alarm_lights": "Weck-Lichter (optional)",
           "media_players": "Weck-Media-Player (optional)",
           "vacation_calendars": "Externe Urlaubs-/Feiertagskalender (optional)",
-          "alarm_volume": "Weck-Lautstärke (0.0–1.0)"
+          "alarm_volume": "Weck-Lautstärke (0.0–1.0)",
+          "alexa_enabled": "Alexa-Geräte-Wecker (Echo) zusätzlich stellen",
+          "alexa_media_player": "Echo media_player (alexa_media) – leer = Weck-Player",
+          "alexa_text_helper": "Helfer: gesetzter Alexa-Wecker (input_text)",
+          "alexa_enabled_boolean": "Helfer: Wecker aktiv (input_boolean)",
+          "pre_alarm_minutes": "Vorab-Wecker auf dem Echo: Minuten vor der Weckzeit"
         }
       }
     },

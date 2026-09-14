@@ -50,6 +50,7 @@ from .const import (
     STATE_STOPPED,
     STATE_VACATION,
 )
+from .alexa import AlexaBridge
 from .logic import (
     compute_alarm_time,
     default_resolution,
@@ -100,6 +101,7 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._vacation_override_day: date | None = None
         self._loop_unsub: Callable[[], None] | None = None
         self._ringing_jobs: list[Callable[[], None]] = []
+        self.alexa = AlexaBridge(hass, self)
 
         self._schedule_daily_jobs()
         # First schedule computation happens in __init__.py after Store restore.
@@ -216,11 +218,18 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_stop_alarm(self, call: ServiceCall) -> None:
         """Stop the looping alarm now."""
-        if self._state == STATE_RINGING:
+        was_ringing = self._state == STATE_RINGING
+        if was_ringing:
             self._stopped_days.add(dt_util.now().date())
             await self._async_stop_loop(set_state=STATE_STOPPED)
         else:
             await self._async_stop_loop()
+        if was_ringing:
+            await self.alexa.async_on_stop()
+        else:
+            await self.alexa.async_clear_own()
+        self._reschedule_alarm()
+        self.async_update_listeners()
         await self.async_save_state()
 
     async def async_dismiss_for_today(self, call: ServiceCall) -> None:
@@ -260,6 +269,7 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Re-evaluate vacation state from calendars (clears stale overrides).
             await self._async_vacation_check()
         await self.async_save_state()
+        self.hass.async_create_task(self.alexa.async_sync())
 
     @property
     def current_mode(self) -> str:
@@ -513,6 +523,7 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._alarm_target,
             self._state,
         )
+        self.hass.async_create_task(self.alexa.async_sync())
 
     async def _alarm_fired(self, now: datetime) -> None:
         """The alarm time has been reached – start the looping alarm."""
@@ -565,6 +576,9 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
             except HomeAssistantError as err:
                 _LOGGER.warning("DAC could not alarm on %s: %s", player, err)
+        # Keep a fresh short device alarm on the Echo while ringing (the
+        # wake loop re-places it every 5 minutes until the alarm is stopped).
+        await self.alexa.async_pre_alarm()
 
     @property
     def _volume(self) -> float:

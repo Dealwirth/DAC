@@ -9,6 +9,7 @@ from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     EntitySelector,
     EntitySelectorConfig,
     NumberSelector,
@@ -27,17 +28,26 @@ import voluptuous as vol
 from .const import (
     CONF_ALARM_LIGHTS,
     CONF_ALARM_VOLUME,
+    CONF_ALEXA_ENABLED,
+    CONF_ALEXA_ENABLED_BOOLEAN,
+    CONF_ALEXA_MEDIA_PLAYER,
+    CONF_ALEXA_TEXT_HELPER,
     CONF_DEFAULT_ALARM_TIME,
     CONF_MEDIA_PLAYERS,
     CONF_NOTIFIER,
     CONF_OFFSET,
+    CONF_PRE_ALARM_MINUTES,
     CONF_REMINDER_TEXT,
     CONF_REMINDER_TIME,
     CONF_VACATION_CALENDARS,
     DEFAULT_ALARM_TIME,
     DEFAULT_ALARM_VOLUME,
+    DEFAULT_ALEXA_ENABLED,
+    DEFAULT_ALEXA_ENABLED_BOOLEAN,
+    DEFAULT_ALEXA_TEXT_HELPER,
     DEFAULT_NAME,
     DEFAULT_OFFSET_MINUTES,
+    DEFAULT_PRE_ALARM_MINUTES,
     DEFAULT_REMINDER_TEXT,
     DEFAULT_REMINDER_TIME,
     DOMAIN,
@@ -113,6 +123,26 @@ def _build_schema(hass, defaults: dict[str, Any]) -> vol.Schema:
                 CONF_ALARM_VOLUME,
                 default=defaults.get(CONF_ALARM_VOLUME, DEFAULT_ALARM_VOLUME),
             ): NumberSelector(NumberSelectorConfig(min=0, max=1, step=0.05, mode=NumberSelectorMode.SLIDER)),
+            vol.Optional(
+                CONF_ALEXA_ENABLED,
+                description={"suggested_value": defaults.get(CONF_ALEXA_ENABLED, DEFAULT_ALEXA_ENABLED)},
+            ): BooleanSelector(),
+            vol.Optional(
+                CONF_ALEXA_MEDIA_PLAYER,
+                description={"suggested_value": defaults.get(CONF_ALEXA_MEDIA_PLAYER, "")},
+            ): EntitySelector(EntitySelectorConfig(domain="media_player", multiple=False)),
+            vol.Optional(
+                CONF_ALEXA_TEXT_HELPER,
+                default=defaults.get(CONF_ALEXA_TEXT_HELPER, DEFAULT_ALEXA_TEXT_HELPER),
+            ): EntitySelector(EntitySelectorConfig(domain="input_text")),
+            vol.Optional(
+                CONF_ALEXA_ENABLED_BOOLEAN,
+                default=defaults.get(CONF_ALEXA_ENABLED_BOOLEAN, DEFAULT_ALEXA_ENABLED_BOOLEAN),
+            ): EntitySelector(EntitySelectorConfig(domain="input_boolean")),
+            vol.Optional(
+                CONF_PRE_ALARM_MINUTES,
+                default=defaults.get(CONF_PRE_ALARM_MINUTES, DEFAULT_PRE_ALARM_MINUTES),
+            ): NumberSelector(NumberSelectorConfig(min=0, max=30, step=1, mode=NumberSelectorMode.BOX)),
         }
     )
 
@@ -128,6 +158,8 @@ def _normalize(user_input: dict[str, Any]) -> dict[str, Any]:
     )
     data[CONF_OFFSET] = int(data.get(CONF_OFFSET, DEFAULT_OFFSET_MINUTES))
     data[CONF_ALARM_VOLUME] = float(data.get(CONF_ALARM_VOLUME, DEFAULT_ALARM_VOLUME))
+    data[CONF_ALEXA_ENABLED] = bool(data.get(CONF_ALEXA_ENABLED, DEFAULT_ALEXA_ENABLED))
+    data[CONF_PRE_ALARM_MINUTES] = int(data.get(CONF_PRE_ALARM_MINUTES, DEFAULT_PRE_ALARM_MINUTES))
     for key in (CONF_ALARM_LIGHTS, CONF_MEDIA_PLAYERS, CONF_VACATION_CALENDARS):
         data.setdefault(key, [])
     return data

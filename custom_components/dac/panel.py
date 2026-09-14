@@ -14,6 +14,7 @@ PANEL_JS = os.path.join(PANEL_DIR, "dac-panel.js")
 
 PANEL_URL = "/dac/static/dac-panel.js"
 PANEL_NAME = "dac-panel"
+CACHE_BUSTER = "2"
 
 
 async def async_register_panel(hass: HomeAssistant) -> None:
@@ -33,7 +34,7 @@ async def async_register_panel(hass: HomeAssistant) -> None:
                 "name": "dac-panel",
                 "embed_iframe": False,
                 "trust_external": False,
-                "js_url": f"{PANEL_URL}?v=1",
+                "js_url": f"{PANEL_URL}?v={CACHE_BUSTER}",
             }
         },
     )
