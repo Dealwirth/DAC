@@ -4,10 +4,10 @@ from __future__ import annotations
 from datetime import time
 from typing import Any
 
+import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
-from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.selector import (
     BooleanSelector,
     EntitySelector,
@@ -23,7 +23,6 @@ from homeassistant.helpers.selector import (
     TextSelectorType,
     TimeSelector,
 )
-import voluptuous as vol
 
 from .const import (
     CONF_ALARM_LIGHTS,

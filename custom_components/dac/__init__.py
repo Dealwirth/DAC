@@ -3,24 +3,15 @@ from __future__ import annotations
 
 from typing import Any
 
+import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
-from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
-import voluptuous as vol
 
 from .const import (
     ATTR_DAY,
     ATTR_TIME,
-    CONF_ALARM_LIGHTS,
-    CONF_DEFAULT_ALARM_TIME,
-    CONF_MEDIA_PLAYERS,
-    CONF_NOTIFIER,
-    CONF_OFFSET,
-    CONF_REMINDER_TEXT,
-    CONF_REMINDER_TIME,
-    CONF_VACATION_CALENDARS,
     DOMAIN,
     PLATFORMS,
     SERVICE_CLEAR_ALEXA_ALARM,
@@ -32,28 +23,30 @@ from .const import (
 from .coordinator import DacCoordinator
 from .dac_card import async_setup_lovelace
 from .http_api import DacApiView
-from .logic import parse_time_str
-from .panel import async_register_panel
 from .store import DacStore
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
+_ENTRY_ID = "config_entry_id"
+
 SET_WORK_TIME_SCHEMA = vol.Schema(
     {
+        vol.Optional(_ENTRY_ID): str,
         vol.Optional(ATTR_TIME): vol.Any(str, cv.time),
         vol.Optional(ATTR_DAY): str,
         vol.Optional("clear"): bool,
     }
 )
-DISMISS_SCHEMA = vol.Schema({vol.Optional(ATTR_DAY): str})
-STOP_SCHEMA = vol.Schema({})
+DISMISS_SCHEMA = vol.Schema({vol.Optional(_ENTRY_ID): str, vol.Optional(ATTR_DAY): str})
+STOP_SCHEMA = vol.Schema({vol.Optional(_ENTRY_ID): str})
 SET_ALEXA_SCHEMA = vol.Schema(
     {
-        vol.Required(ATTR_TIME): vol.Any(str, cv.time),
+        vol.Optional(_ENTRY_ID): str,
+        vol.Optional(ATTR_TIME): vol.Any(str, cv.time),
         vol.Optional(ATTR_DAY): str,
     }
 )
-CLEAR_ALEXA_SCHEMA = vol.Schema({})
+CLEAR_ALEXA_SCHEMA = vol.Schema({vol.Optional(_ENTRY_ID): str})
 
 _SERVICE_MAP = {
     SERVICE_SET_WORK_TIME: (SET_WORK_TIME_SCHEMA, SupportsResponse.NONE),
@@ -65,9 +58,12 @@ _SERVICE_MAP = {
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Register the HTTP API and the custom dashboard panel (once)."""
+    """Register the HTTP API and the custom dashboard (once).
+
+    The static files (Lovelace card) and the sidebar dashboard are registered
+    via Lovelace, which loads asynchronously – hence the deferred task.
+    """
     hass.http.register_view(DacApiView())
-    await async_register_panel(hass)
     # Lovelace card + dedicated dashboard (deferred, lovelace loads later).
     hass.async_create_task(async_setup_lovelace(hass))
     return True
@@ -103,12 +99,12 @@ def _make_handler(hass: HomeAssistant, service: str) -> Any:
             coordinator = coordinators[entry_id]
         elif len(coordinators) == 1:
             coordinator = next(iter(coordinators.values()))
-        elif call.data.get("device_id") or call.data.get("entity_id"):
+        else:
+            # Never guess with multiple entries – the wrong alarm could be
+            # stopped or overwritten otherwise.
             raise HomeAssistantError(
                 "Multiple DAC entries found – pass config_entry_id explicitly"
             )
-        else:
-            coordinator = next(iter(coordinators.values()))
 
         if service == SERVICE_SET_WORK_TIME:
             await coordinator.async_set_work_time(call)
@@ -117,7 +113,7 @@ def _make_handler(hass: HomeAssistant, service: str) -> Any:
         elif service == SERVICE_DISMISS_FOR_TODAY:
             await coordinator.async_dismiss_for_today(call)
         elif service == SERVICE_SET_ALEXA_ALARM:
-            await coordinator.alexa.async_sync()
+            await coordinator.alexa.async_set_alarm(call)
         elif service == SERVICE_CLEAR_ALEXA_ALARM:
             await coordinator.alexa.async_clear_own()
 
@@ -136,6 +132,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unload_ok:
         coordinator: DacCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
         coordinator.async_shutdown()
-        for service in _SERVICE_MAP:
-            hass.services.async_remove(DOMAIN, service)
+        # Only drop the services once the *last* DAC entry is gone.
+        if not hass.data[DOMAIN]:
+            hass.data.pop(DOMAIN, None)
+            for service in _SERVICE_MAP:
+                hass.services.async_remove(DOMAIN, service)
     return unload_ok

@@ -17,11 +17,14 @@ import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 
 from .const import (
     ALEXA_SET_TEXT,
+    ATTR_DAY,
+    ATTR_TIME,
     CONF_ALEXA_ENABLED,
     CONF_ALEXA_ENABLED_BOOLEAN,
     CONF_ALEXA_MEDIA_PLAYER,
@@ -119,12 +122,14 @@ class AlexaBridge:
             alarm_time = coordinator._alarm_time
             pre = self.pre_alarm_minutes
             if pre:
+                # Only shift into the past if it stays on the same day; a
+                # negative shift across midnight would set a wrong-day alarm.
                 shifted = (
                     dt_util.start_of_local_day(today)
                     + timedelta(hours=alarm_time.hour, minutes=alarm_time.minute)
                     - timedelta(minutes=pre)
                 )
-                if shifted.date() == today:
+                if shifted.date() == today and shifted.time() < alarm_time:
                     alarm_time = shifted.time()
             desired = format_alexa_time(alarm_time)
 
@@ -136,6 +141,33 @@ class AlexaBridge:
         if desired:
             await self.async_send_text(alexa_set_text(parse_time_str(desired)))
         await self._async_write_helper(desired or "")
+
+    async def async_set_alarm(self, call: ServiceCall | Any) -> None:
+        """Handle dac.set_alexa_alarm – optional explicit time/day override.
+
+        Without ``time`` the currently computed alarm is (re-)placed on the
+        device. With an explicit ``time`` the given alarm is placed directly
+        (an existing DAC alarm is removed first).
+        """
+        if not self.enabled:
+            return
+        raw_time = call.data.get(ATTR_TIME) if hasattr(call, "data") else None
+        if not raw_time:
+            await self.async_sync()
+            return
+
+        try:
+            value = parse_time_str(raw_time)
+        except ValueError as err:
+            raise HomeAssistantError(f"Invalid time: {raw_time!r}") from err
+        text = format_alexa_time(value)
+
+        stored = self.stored_alarm()
+        if stored and stored != text:
+            await self.async_send_text(alexa_clear_text(parse_time_str(stored)))
+        await self.async_send_text(alexa_set_text(value))
+        await self._async_write_helper(text)
+        _LOGGER.debug("DAC placed a manual Alexa alarm for %s (%s)", text, call.data.get(ATTR_DAY))
 
     async def async_clear_own(self) -> None:
         """Delete only the alarm DAC has placed on the device (Tag 4)."""

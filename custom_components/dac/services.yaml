@@ -4,16 +4,23 @@ set_work_time:
     Setzt den Arbeitsbeginn und berechnet daraus automatisch die Weckzeit
     (Arbeitsbeginn minus Offset). Auch für NFC-Tags geeignet.
   fields:
+    config_entry_id:
+      name: Config-Eintrag
+      description: >-
+        Nur nötig, wenn mehrere DAC-Einträge existieren – wählt die passende
+        Instanz explizit aus.
+      selector:
+        text:
     time:
       name: Arbeitsbeginn
       description: Arbeitsbeginn als Zeit, z. B. "08:00"
-      required: true
+      required: false
       example: "08:00"
       selector:
         time:
     day:
       name: Tag
-      description: ">"
+      description: Optionales Datum (ISO, z. B. "2026-09-07") für den Arbeitsbeginn.
       selector:
         text:
     clear:
@@ -26,11 +33,26 @@ set_work_time:
 stop_alarm:
   name: Wecker stoppen
   description: Stoppt die laufende Weck-Schleife (Licht + Media-Player).
+  fields:
+    config_entry_id:
+      name: Config-Eintrag
+      description: >-
+        Nur nötig, wenn mehrere DAC-Einträge existieren – wählt die passende
+        Instanz explizit aus.
+      selector:
+        text:
 
 dismiss_for_today:
   name: Für heute deaktivieren
   description: Deaktiviert den Wecker für den aktuellen bzw. kommenden Tag.
   fields:
+    config_entry_id:
+      name: Config-Eintrag
+      description: >-
+        Nur nötig, wenn mehrere DAC-Einträge existieren – wählt die passende
+        Instanz explizit aus.
+      selector:
+        text:
     day:
       name: Tag
       description: Optionales Datum (ISO), das deaktiviert werden soll.
@@ -44,6 +66,13 @@ set_alexa_alarm:
     Echo-Gerät (Textbefehl mit "morgens"/"abends", keine Rückfragen von
     Alexa). Löscht vorher exakt nur den zuvor von DAC gesetzten Wecker.
   fields:
+    config_entry_id:
+      name: Config-Eintrag
+      description: >-
+        Nur nötig, wenn mehrere DAC-Einträge existieren – wählt die passende
+        Instanz explizit aus.
+      selector:
+        text:
     time:
       name: Weckzeit
       description: Optionale abweichende Zeit (sonst die aktuell berechnete Weckzeit).
@@ -52,7 +81,10 @@ set_alexa_alarm:
         time:
     day:
       name: Tag
-      description: Optionales Datum (ISO).
+      description: >-
+        Optionales Datum (ISO). Hinweis: Alexa-Gerätewecker gelten immer für das
+        nächste Auftreten der Uhrzeit, ein konkretes Datum kann per Sprachbefehl
+        nicht gesetzt werden.
       selector:
         text:
 
@@ -62,3 +94,11 @@ clear_alexa_alarm:
     Löscht exakt nur den Wecker, den DAC selbst gesetzt hat (gespeichert im
     Helfer input_text.gestellter_alexa_wecker). Manuell auf der Alexa
     gestellte Wecker bleiben unberührt.
+  fields:
+    config_entry_id:
+      name: Config-Eintrag
+      description: >-
+        Nur nötig, wenn mehrere DAC-Einträge existieren – wählt die passende
+        Instanz explizit aus.
+      selector:
+        text:

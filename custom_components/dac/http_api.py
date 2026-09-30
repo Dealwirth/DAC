@@ -16,7 +16,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class DacApiView(HomeAssistantView):
-    """REST-ish API under /api/dac for the custom panel."""
+    """REST-ish API under /api/dac used by the DAC dashboard card."""
 
     url = "/api/dac"
     name = "api:dac"
@@ -31,7 +31,7 @@ class DacApiView(HomeAssistantView):
         return self.json(payload)
 
     async def post(self, request) -> None:
-        """Execute an action: set_work_time / stop / dismiss / mode."""
+        """Execute an action: set_work_time / stop / dismiss / mode / vacation."""
         hass = request.app["hass"]
         try:
             body = await request.json()
@@ -41,7 +41,7 @@ class DacApiView(HomeAssistantView):
         coordinators = _coordinators(hass)
         if not coordinators:
             return self.json_message("no dac entry configured", 404)
-        coordinator = coordinators[0]
+        coordinator = _pick_coordinator(hass, body.get("entry_id")) or coordinators[0]
 
         try:
             if action == "set_work_time":
@@ -70,11 +70,29 @@ class DacApiView(HomeAssistantView):
 
 
 def _coordinators(hass: HomeAssistant) -> list[DacCoordinator]:
+    """All loaded DAC coordinators."""
     return list((hass.data.get(DOMAIN) or {}).values())
 
 
-def _first_calendar(hass: HomeAssistant):
-    """Find the first DAC vacation calendar entity."""
+def _pick_coordinator(hass: HomeAssistant, entry_id: str | None) -> DacCoordinator | None:
+    """Pick a specific coordinator by entry id (if given and valid)."""
+    if not entry_id:
+        return None
+    return (hass.data.get(DOMAIN) or {}).get(entry_id)
+
+
+def _first_calendar(hass: HomeAssistant) -> str | None:
+    """Find the first DAC vacation calendar entity.
+
+    Prefers the entity registry (stable across renames) and falls back to the
+    entity-id prefix so the dashboard keeps working in odd setups.
+    """
+    from homeassistant.helpers import entity_registry as er
+
+    registry = er.async_get(hass)
+    for entry in registry.entities.values():
+        if entry.platform == DOMAIN and entry.domain == "calendar":
+            return entry.entity_id
     for state in hass.states.async_all("calendar"):
         if state.entity_id.startswith("calendar.dac"):
             return state.entity_id
@@ -113,28 +131,34 @@ async def _remove_vacation(hass: HomeAssistant, body: dict) -> None:
     uid = body.get("uid")
     if not uid:
         raise HomeAssistantError("uid required")
-    platform = hass.data.get("calendar")
-    # Fallback: call the entity method directly through the entity platform.
-    component = hass.data.get("calendar") or {}
-    entity = None
-    if hasattr(component, "get_entity"):
-        entity = component.get_entity(entity_id)
-    if entity is None:
-        entity = _lookup_entity(hass, entity_id)
+    entity = _lookup_entity(hass, entity_id)
     if entity is None or not hasattr(entity, "async_delete_event"):
         raise HomeAssistantError("Calendar entity not found")
     await entity.async_delete_event(uid)
 
 
 def _lookup_entity(hass: HomeAssistant, entity_id: str):
-    """Find an entity object via the entity platform registry."""
-    for entry_platform in hass.data.get("entity_platform", {}).values():
-        try:
-            entity = entry_platform.get_entity(entity_id)
-        except (AttributeError, KeyError):
-            entity = None
-        if entity is not None:
-            return entity
+    """Find a live entity object by its entity id.
+
+    ``hass.data["domain_entities"]`` maps ``domain -> {entity_id: Entity}`` and
+    is the documented internal index (populated in ``EntityPlatform.__init__``).
+    The ``entity_platform`` mapping (``domain -> [EntityPlatform, ...]``) is used
+    as a fallback so the lookup survives internal reshuffles.
+    """
+    domain = entity_id.split(".", 1)[0]
+    domain_entities = hass.data.get("domain_entities") or {}
+    entity = (domain_entities.get(domain) or {}).get(entity_id)
+    if entity is not None:
+        return entity
+
+    for platform_list in (hass.data.get("entity_platform") or {}).values():
+        for platform in platform_list:
+            getter = getattr(platform, "get_entity", None)
+            if getter is None:
+                continue
+            entity = getter(entity_id)
+            if entity is not None:
+                return entity
     return None
 
 
@@ -143,6 +167,7 @@ async def _entry_payload(hass: HomeAssistant, coordinator: DacCoordinator) -> di
     data = coordinator.data
     calendar_events = await _vacation_events(hass, 14)
     return {
+        "entry_id": coordinator.entry_id,
         "state": data.get("state"),
         "mode": data.get("mode"),
         "vacation": data.get("vacation"),
@@ -162,12 +187,12 @@ def _alexa_payload(coordinator: DacCoordinator) -> dict:
     """Status of the optional Alexa device-alarm bridge."""
     bridge = coordinator.alexa
     player = bridge.player
-    helper_state = hass_states(coordinator.hass, bridge.helper)
-    gate_state = hass_states(coordinator.hass, bridge.gate_boolean)
+    helper_state = _state(coordinator.hass, bridge.helper)
+    gate_state = _state(coordinator.hass, bridge.gate_boolean)
     return {
         "enabled": bridge.enabled,
         "player": player,
-        "player_ok": bool(player) and hass_states(coordinator.hass, player) is not None,
+        "player_ok": bool(player) and _state(coordinator.hass, player) is not None,
         "helper": bridge.helper,
         "helper_ok": helper_state is not None,
         "gate": bridge.gate_boolean,
@@ -178,8 +203,8 @@ def _alexa_payload(coordinator: DacCoordinator) -> dict:
     }
 
 
-def hass_states(hass: HomeAssistant, entity_id: str):
-    """Wrapper so _alexa_payload stays easy to read."""
+def _state(hass: HomeAssistant, entity_id: str):
+    """Small helper so _alexa_payload stays easy to read."""
     return hass.states.get(entity_id)
 
 

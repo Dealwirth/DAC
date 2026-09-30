@@ -1,8 +1,9 @@
 """Calendar platform for DAC – the DAC vacation calendar (Urlaubskalender)."""
 from __future__ import annotations
 
-from datetime import date, datetime, time as dt_time, timedelta
 import random
+from datetime import date, datetime
+from datetime import time as dt_time
 from typing import Any
 
 from homeassistant.components.calendar import (
@@ -126,13 +127,22 @@ class DacVacationCalendar(CalendarEntity):
         recurrence_id: str | None = None,
         recurrence_range: str | None = None,
     ) -> None:
-        """Update an event (drag & drop in the calendar editor)."""
+        """Update an event (drag & drop in the calendar editor).
+
+        HA may pass the boundaries as ``dtstart``/``dtend`` or as
+        ``start``/``end`` (datetime or date) – both are normalized here.
+        """
+        start = event.get("dtstart") or event.get("start")
+        end = event.get("dtend") or event.get("end")
         for ev in self._events:
             if ev.get("uid") == uid:
-                ev["summary"] = event.get("summary") or ev["summary"]
+                if event.get("summary"):
+                    ev["summary"] = event["summary"]
                 ev["description"] = event.get("description") or ""
-                ev["start"] = _serialize(event["start"])
-                ev["end"] = _serialize(event["end"])
+                if start is not None:
+                    ev["start"] = _serialize(start)
+                if end is not None:
+                    ev["end"] = _serialize(end)
         await self._async_save()
         self.async_write_ha_state()
 

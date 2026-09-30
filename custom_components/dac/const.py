@@ -82,4 +82,9 @@ ALEXA_CLEAR_TEXT: Final = "lösche den Wecker um {time} Uhr"
 # --- Services (Alexa) -------------------------------------------------------
 SERVICE_SET_ALEXA_ALARM: Final = "set_alexa_alarm"
 SERVICE_CLEAR_ALEXA_ALARM: Final = "clear_alexa_alarm"
-SERVICE_CLEAR_ALEXA_ALARM: Final = "clear_alexa_alarm"
+
+# --- Lovelace / dashboard ---------------------------------------------------
+DASHBOARD_URL_PATH: Final = "dac-wecker"
+DASHBOARD_TITLE: Final = "DAC Wecker"
+CARD_URL: Final = "dac-wecker"
+CARD_URL_PATH: Final = "/dac/static/dac-card.js"

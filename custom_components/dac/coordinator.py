@@ -9,9 +9,9 @@ The coordinator owns the full alarm lifecycle:
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from datetime import date, datetime, time, timedelta
-import logging
 from typing import Any, Final
 
 from homeassistant.config_entries import ConfigEntry
@@ -25,6 +25,7 @@ from homeassistant.helpers.event import (
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
+from .alexa import AlexaBridge
 from .const import (
     CONF_ALARM_LIGHTS,
     CONF_ALARM_VOLUME,
@@ -50,12 +51,10 @@ from .const import (
     STATE_STOPPED,
     STATE_VACATION,
 )
-from .alexa import AlexaBridge
 from .logic import (
     compute_alarm_time,
     default_resolution,
     event_marks_vacation,
-    next_occurrence,
     parse_time_str,
 )
 from .store import DacStore
@@ -332,25 +331,33 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._reschedule_alarm()
             return
 
-        # Resume a ringing alarm if HA restarted during the alarm window.
-        if (
-            saved_state == STATE_RINGING
-            and self._alarm_day == dt_util.now().date()
-            and data.get("alarm_target")
-        ):
+        # Resume a ringing alarm if HA restarted during the alarm window. The
+        # state may still read "scheduled" when the restart happened right after
+        # the alarm fired (the ringing state is not persisted), so a recent
+        # past target also counts – otherwise the alarm would roll to tomorrow
+        # and the user could oversleep.
+        saved_target = None
+        if data.get("alarm_target"):
             try:
-                target = dt_util.parse_datetime(data["alarm_target"])
+                saved_target = dt_util.parse_datetime(data["alarm_target"])
             except (ValueError, TypeError):
-                target = None
-            if target and dt_util.now() - target <= timedelta(hours=1):
-                self._set_state(STATE_RINGING)
-                self.async_update_listeners()
-                await self._async_fire_once()
-                if self._state == STATE_RINGING:
-                    self._loop_unsub = async_track_time_interval(
-                        self.hass, self._loop_tick, DEFAULT_LOOP_INTERVAL
-                    )
-                return
+                saved_target = None
+        if (
+            saved_state in (STATE_RINGING, STATE_SCHEDULED)
+            and self._alarm_day == dt_util.now().date()
+            and saved_target is not None
+            and timedelta(0) <= dt_util.now() - saved_target <= timedelta(hours=1)
+        ):
+            self._alarm_day = saved_target.date()
+            self._alarm_time = saved_target.time()
+            self._set_state(STATE_RINGING)
+            self.async_update_listeners()
+            await self._async_fire_once()
+            if self._state == STATE_RINGING:
+                self._loop_unsub = async_track_time_interval(
+                    self.hass, self._loop_tick, DEFAULT_LOOP_INTERVAL
+                )
+            return
         self._reschedule_alarm()
 
     # ------------------------------------------------------------ scheduling
@@ -425,6 +432,9 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         tomorrow = now.date() + timedelta(days=1)
         scheduled_for = self._work_time_day or self._alarm_day
+        # The cutoff has passed: commit the fallback default alarm so the user
+        # never wakes up without a scheduled alarm.
+        self._reschedule_alarm()
         if scheduled_for in (now.date(), tomorrow):
             return  # a work time is already set
         if self._state == STATE_RINGING:
@@ -474,16 +484,17 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             work_time = None
 
         if work_time is not None:
-            if self._work_time_day is not None:
-                candidate = datetime.combine(
-                    self._work_time_day, work_time, tzinfo=now.tzinfo
-                )
-                if candidate <= now and self._work_time_day == now.date():
-                    candidate = next_occurrence(now, work_time)
-                self._alarm_day = candidate.date()
-            else:
-                candidate = next_occurrence(now, work_time)
-                self._alarm_day = candidate.date()
+            # The day the *work shift* starts (used for persistence + reminder).
+            work_day = self._work_time_day or now.date()
+            shifted = compute_alarm_time(work_time, self.offset_minutes)
+            candidate = datetime.combine(work_day, shifted, tzinfo=now.tzinfo)
+            if shifted > work_time:
+                # The offset wrapped across midnight (e.g. 00:30 - 60min):
+                # the alarm belongs to the previous calendar day.
+                candidate -= timedelta(days=1)
+            if candidate <= now and work_day <= now.date():
+                candidate += timedelta(days=1)
+            self._alarm_day = candidate.date()
             self._alarm_time = work_time
         else:
             day, t = default_resolution(now, self.default_alarm_time, self.cutoff_time)
