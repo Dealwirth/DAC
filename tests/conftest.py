@@ -15,11 +15,10 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 # at all. DAC's tests make no network calls, so we simply keep sockets open.
 pytest_socket.disable_socket = lambda *args, **kwargs: None  # type: ignore[assignment]
 
-from homeassistant.core import HomeAssistant  # noqa: E402
-from homeassistant.util import dt as dt_util  # noqa: E402
+from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 
 from custom_components.dac.const import (
-    DOMAIN,
     CONF_ALARM_LIGHTS,
     CONF_ALARM_VOLUME,
     CONF_ALEXA_ENABLED,
@@ -42,6 +41,7 @@ from custom_components.dac.const import (
     DEFAULT_PRE_ALARM_MINUTES,
     DEFAULT_REMINDER_TEXT,
     DEFAULT_REMINDER_TIME,
+    DOMAIN,
 )
 from custom_components.dac.coordinator import DacCoordinator
 from custom_components.dac.store import DacStore
@@ -111,7 +111,6 @@ async def coordinator(
     hass: HomeAssistant, config_entry: MockConfigEntry, store: DacStore
 ):
     """A coordinator on a real (test) hass, with all timers live."""
-    from collections.abc import AsyncIterator
 
     coord = DacCoordinator(hass, config_entry, store=store)
     await hass.async_block_till_done()  # drain the startup vacation check

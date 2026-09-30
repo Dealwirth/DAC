@@ -4,12 +4,10 @@ from __future__ import annotations
 from datetime import time
 from unittest.mock import patch
 
-from freezegun import freeze_time
 import pytest
-
+from freezegun import freeze_time
 from homeassistant.core import HomeAssistant
 
-from custom_components.dac.alexa import AlexaBridge
 from custom_components.dac.const import (
     ALEXA_CLEAR_TEXT,
     ALEXA_SET_TEXT,
@@ -64,11 +62,9 @@ def service_calls(hass: HomeAssistant) -> list[tuple[str, str, dict]]:
     """Capture all service calls DAC makes during a test."""
     calls: list[tuple[str, str, dict]] = []
     registry_cls = type(hass.services)
-    real_call = registry_cls.async_call
 
     async def spy(self, domain, service, service_data=None, **kwargs):
         calls.append((domain, service, dict(service_data or {})))
-        return None
 
     with patch.object(registry_cls, "async_call", autospec=True, side_effect=spy):
         yield calls
@@ -184,3 +180,39 @@ def test_pre_alarm_time_text_parses(coordinator) -> None:
     """The pre-alarm time text is always a valid HH:MM time."""
     coordinator._alarm_time = time(6, 0)
     parse_time_str(coordinator.alexa.pre_alarm_time_text())
+
+
+async def test_service_set_alarm_uses_explicit_time(
+    hass: HomeAssistant, coordinator, service_calls: list[tuple[str, str, dict]]
+) -> None:
+    """set_alexa_alarm with an explicit time replaces DAC's own alarm."""
+    from tests.conftest import FakeCall
+
+    coordinator._options[CONF_ALEXA_ENABLED] = True
+    _set_state(hass, "input_text.gestellter_alexa_wecker", "06:00")
+
+    await coordinator.alexa.async_set_alarm(FakeCall({"time": "07:15"}))
+
+    texts = [data.get("media_content_id", "") for d, s, data in service_calls if s == "play_media"]
+    assert "lösche den Wecker um 06:00 Uhr" in texts
+    assert "stelle einen Wecker auf 07:15 Uhr morgens" in texts
+    helper_writes = [data.get("value") for d, s, data in service_calls if s == "set_value"]
+    assert "07:15" in helper_writes
+
+
+async def test_service_set_alarm_without_time_syncs(
+    hass: HomeAssistant, coordinator, service_calls: list[tuple[str, str, dict]]
+) -> None:
+    """Without a time the service falls back to the computed sync."""
+    from homeassistant.util import dt as dt_util
+
+    from tests.conftest import FakeCall
+
+    coordinator._options[CONF_ALEXA_ENABLED] = True
+    # A scheduled alarm for today makes the sync place a device alarm.
+    coordinator._alarm_day = dt_util.now().date()
+    coordinator._alarm_time = time(6, 0)
+
+    await coordinator.alexa.async_set_alarm(FakeCall({}))
+
+    assert any(s == "set_value" for d, s, _ in service_calls)

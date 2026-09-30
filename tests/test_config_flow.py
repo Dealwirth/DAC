@@ -84,7 +84,7 @@ async def test_options_flow_updates_values(
     """The options flow persists updated values and reloads the entry."""
     from unittest.mock import AsyncMock, patch
 
-    with patch("custom_components.dac.async_register_panel", new=AsyncMock()):
+    with patch("custom_components.dac.async_setup_lovelace", new=AsyncMock()):
         await hass.config_entries.async_setup(config_entry.entry_id)
         await hass.async_block_till_done()
 

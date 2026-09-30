@@ -18,7 +18,7 @@ deine Arbeitszeit zu setzen.
 | **Fallback-Weckzeit** | Wurde nichts gesetzt, greift eine konfigurierbare Standard-Weckzeit (z. B. 06:00) – mit intelligenter Cutoff-Logik |
 | **Urlaub & Feiertage** | Täglicher Scan (00:01) gegen einen eigenen Urlaubskalender und/oder externe Kalender; Keywords wie *Urlaub, Feiertag, Ferien, vacation, holiday* |
 | **Reminder** | Tägliche Erinnerung (z. B. 20:30) via frei wählbarem `notify.*`-Dienst, wenn für morgen noch keine Arbeitszeit gesetzt wurde |
-| **Eigenes Dashboard** | Wecker-Panel in der Seitenleiste – pure Web-Component, kein Lovelace nötig |
+| **Eigenes Dashboard** | „DAC Wecker"-Dashboard in der Seitenleiste (Lovelace-Storage) – fertig eingerichtet, voll editierbar |
 | **Lovelace-Karte** | `custom:dac-wecker` als Lovelace-Ressource + fertiges „DAC Wecker"-Dashboard – automatisch registriert, in JEDEM Dashboard nutzbar |
 | **Alexa-Geräte-Wecker** | Optional: echter Wecker auf dem Echo – Textbefehl mit „morgens"/„abends" (keine Rückfragen), gezieltes Löschen nur des DAC-eigenen Weckers, 2-Minuten-Vorab-Wecker im Weck-Loop |
 | **Restpersistenz** | Wecker-Zustand überlebt Neustarts; ein Wecker, der während des Klingelns „verpasst" wurde, resumed |
@@ -44,7 +44,7 @@ Nach der Einrichtung erscheint **„DAC Wecker"** automatisch in der Seitenleist
 - Große Uhr + Countdown bis zum Wecker
 - Arbeitsbeginn per Zeileingabe setzen/zurücksetzen
 - Modus: **Standard** / **Heute aus** / **Urlaub**
-- Urlaubstage direkt im Panel eintragen (eigener Kalender) oder löschen
+- Urlaubstage direkt in der Karte eintragen (eigener Kalender) oder löschen
 - Roter Puls-Banner + Stop-Button, wenn der Wecker gerade klingelt
 
 ### 🃏 Lovelace-Karte für jedes Dashboard
@@ -55,12 +55,20 @@ fertiges Dashboard **„DAC Wecker"** (`/dac-wecker`) angelegt:
 - Karte **„DAC Wecker“** (`custom:dac-wecker`) in jedem Dashboard über den
   Karten-Picker hinzufügen (unter *Benutzerdefinierte Karten*)
 - Die Karte zeigt Uhr, Countdown, Status, Alexa-Wecker-Status,
-  Arbeitsbeginn-Eingabe und Modus-Umschalter
+  Arbeitsbeginn-Eingabe, Modus-Umschalter und die Urlaubsverwaltung
 - Das Auto-Dashboard ist ein normaler Startpunkt – vollständig editierbar,
   deine Änderungen werden nie überschrieben
 
 > Nutzt du Lovelace im YAML-Modus? Dann ergänze die Ressource manuell:
 > `url: /dac/static/dac-card.js`, `type: module`.
+
+### 🎨 Design
+
+Die Karte ist im **Amazon-/Alexa-Look** gehalten: dunkles „Squid-Ink"-Blau
+(`#232f3e`), Akzent in Alexa-Orange (`#ff9900`) und der typischen
+Amazon-Ember-Schrift. Passend zum jeweiligen Status wechselt der Kopfbereich
+die Farbe (ruhig/blau bei geplant, rot-orange pulsierend beim Klingeln,
+grün im Urlaub, grau bei deaktiviert/gestoppt).
 
 ## ⚙️ Konfiguration (Options-Flow)
 
@@ -87,6 +95,9 @@ fertiges Dashboard **„DAC Wecker"** (`/dac-wecker`) angelegt:
 - Standard-Weckzeit vorbei, **vor** der Reminder-Zeit → nichts geplant (du wirst noch erinnert).
 - Standard-Weckzeit vorbei, **nach** der Reminder-Zeit (Cutoff) → Standard-Weckzeit für morgen.
 - Arbeitszeit-Scans nach dem Cutoff gelten automatisch für **morgen**.
+- **Oversleep-Schutz:** Sobald die Reminder-Zeit erreicht ist, wird der
+  Standard-Wecker verbindlich für den nächsten Tag scharf geschaltet –
+  selbst wenn du die Erinnerung ignorierst, verschläfst du nicht.
 
 ## 🛠️ Dienste (Services)
 
@@ -177,10 +188,11 @@ py -m venv .venv
 .venv/Scripts/python -m pytest tests -v
 ```
 
-55 Tests decken die komplette Weck-Logik ab: Offset-Berechnung, Mitternachts-Wrap,
-Fallback-/Cutoff-Semantik, Weck-Loop, Dismiss, Vacation-Check, Reminder, Persistenz,
-Alexa-Bridge (morgens/abends, gezieltes Löschen, Vorab-Wecker),
-Lovelace-Ressourcen-/Dashboard-Registrierung, Config-/Options-Flow und Service-Registrierung.
+73 Tests decken die komplette Weck-Logik ab: Offset-Berechnung, Mitternachts-Wrap,
+Fallback-/Cutoff-Semantik inkl. Oversleep-Schutz, Weck-Loop, Dismiss, Vacation-Check,
+Reminder, Persistenz, Alexa-Bridge (morgens/abends, gezieltes Löschen, Vorab-Wecker),
+Lovelace-Ressourcen-/Dashboard-Registrierung (inkl. Element-/Typ-Abgleich),
+Config-/Options-Flow und Service-Registrierung.
 
 ## 📄 Lizenz
 

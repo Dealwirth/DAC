@@ -1,15 +1,16 @@
 """Tests for the Lovelace card/dashboard auto-registration (dac_card.py)."""
 from __future__ import annotations
 
+from typing import ClassVar
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
 from homeassistant.core import HomeAssistant
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.dac.const import DOMAIN
-from custom_components.dac.dac_card import DASHBOARD_URL_PATH, RESOURCE_URL
+from custom_components.dac.const import (
+    CARD_URL_PATH,
+    DASHBOARD_URL_PATH,
+)
 
 
 @pytest.fixture
@@ -36,7 +37,7 @@ async def test_card_resource_registered(hass: HomeAssistant, lovelace) -> None:
 
     items = lovelace.resources.async_items() or []
     urls = [item.get("url") for item in items if isinstance(item, dict)]
-    assert RESOURCE_URL in urls
+    assert CARD_URL_PATH in urls
     types = [item.get("type") for item in items if isinstance(item, dict)]
     assert "module" in types
 
@@ -50,7 +51,7 @@ async def test_card_resource_idempotent(hass: HomeAssistant, lovelace) -> None:
 
     items = lovelace.resources.async_items() or []
     urls = [item.get("url") for item in items if isinstance(item, dict)]
-    assert urls.count(RESOURCE_URL) == 1
+    assert urls.count(CARD_URL_PATH) == 1
 
 
 async def test_dashboard_created_with_initial_view(hass: HomeAssistant, lovelace) -> None:
@@ -62,7 +63,7 @@ async def test_dashboard_created_with_initial_view(hass: HomeAssistant, lovelace
 
     storage_dash = lovelace.dashboards[DASHBOARD_URL_PATH]
     config = await storage_dash.async_load(False)
-    assert config["views"][0]["type"] == "custom:dac-wecker"
+    assert config["views"][0]["cards"][0]["type"] == "custom:dac-wecker"
 
     # Sidebar panel registered.
     from homeassistant.components.frontend import DATA_PANELS
@@ -99,10 +100,56 @@ async def test_yaml_mode_does_not_crash(hass: HomeAssistant) -> None:
     class FakeYaml:
         resource_mode = "yaml"
         resources = None
-        dashboards = {}
+        dashboards: ClassVar[dict] = {}
 
     hass.data["lovelace"] = FakeYaml()
     await async_setup_lovelace(hass)
+
+
+async def test_dashboard_card_type_resolves_to_element(hass: HomeAssistant, lovelace) -> None:
+    """The configured card type must resolve to the element defined in the JS.
+
+    HA maps ``custom:<name>`` to the custom element ``<name>``. The JS file
+    defines ``<dac-wecker>``, so the dashboard config must use that name – a
+    mismatch shows up as "Custom element doesn't exist".
+    """
+    import re
+    from pathlib import Path
+
+    from custom_components.dac.dac_card import CARD_TYPE, INITIAL_VIEW
+
+    card_type = INITIAL_VIEW["cards"][0]["type"]
+    assert card_type == CARD_TYPE == "custom:dac-wecker"
+    element = card_type.split(":", 1)[1]
+
+    js = (Path(__file__).parents[1] / "custom_components/dac/www/dac-card.js").read_text(
+        encoding="utf-8"
+    )
+    assert re.search(rf'customElements\.define\(\s*"{re.escape(element)}"', js), (
+        f"{card_type} resolves to <{element}>, which dac-card.js does not define"
+    )
+    assert f'type: "{element}"' in js  # window.customCards entry matches too
+
+
+async def test_card_js_is_valid(hass: HomeAssistant) -> None:
+    """The shipped JS must be syntactically parseable (guard against typos)."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if node is None:
+        import pytest
+
+        pytest.skip("node is not available")
+    card_js = Path(__file__).parents[1] / "custom_components/dac/www/dac-card.js"
+    result = subprocess.run(  # noqa: ASYNC221 – tests intentionally shell out to node
+        [node, "--check", str(card_js)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 async def test_setup_entry_registers_card(hass: HomeAssistant, config_entry) -> None:

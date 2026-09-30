@@ -1,12 +1,10 @@
 """Tests for the DacCoordinator alarm state machine."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from unittest.mock import patch
 
 from freezegun import freeze_time
-import pytest
-
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
@@ -261,7 +259,7 @@ async def test_reminder_sent_when_no_work_time(
 
     notify_calls = [c for c in recorded if c[0] == "notify"]
     assert len(notify_calls) == 1
-    domain, service, data = notify_calls[0]
+    _, service, data = notify_calls[0]
     assert service == "test"
     assert "Standard-Wecker" in data["message"] or "DAC" in data["message"]
 
@@ -285,6 +283,43 @@ async def test_reminder_skipped_on_vacation(
     coordinator._is_vacation = True
     await coordinator._async_reminder_check(dt_util.now())
     assert not [c for c in recorded if c[0] == "notify"]
+
+
+@freeze_time("2026-09-06 19:00:00")  # Berlin 21:00, after cutoff -> work day tomorrow
+async def test_early_shift_wraps_before_work_day(
+    hass: HomeAssistant, coordinator: DacCoordinator
+):
+    """Work start 00:30 + 60 min offset -> alarm the night *before* (23:30)."""
+    await coordinator.async_set_work_time(_fake_call({"time": "00:30"}))
+
+    target_local = dt_util.as_local(coordinator._alarm_target)
+    assert target_local.strftime("%H:%M") == "23:30"
+    # 2026-09-06 23:30 (the night before the 00:30 shift on 2026-09-07).
+    assert target_local.date().isoformat() == "2026-09-06"
+    assert coordinator._alarm_day == target_local.date()
+
+
+@freeze_time("2026-09-06 18:30:00")  # Berlin 20:30 = cutoff
+async def test_cutoff_commits_fallback_alarm(
+    hass: HomeAssistant, coordinator: DacCoordinator, recorded
+):
+    """At the cutoff the fallback alarm is armed so nobody oversleeps.
+
+    Simulates a restart inside the "awaiting input" window: nothing is
+    scheduled, then the cutoff reminder job must commit the default alarm.
+    """
+    coordinator._set_state(STATE_IDLE)
+    coordinator._alarm_target = None
+    coordinator._alarm_day = None
+    coordinator._alarm_time = None
+
+    await coordinator._async_reminder_check(dt_util.now())
+
+    assert coordinator._state == STATE_SCHEDULED
+    assert coordinator._alarm_time.strftime("%H:%M") == "06:00"
+    assert coordinator._alarm_day == dt_util.now().date() + timedelta(days=1)
+    assert coordinator._alarm_target is not None
+    assert [c for c in recorded if c[0] == "notify"]  # reminder still sent
 
 
 # ---------------------------------------------------------------------------
@@ -326,5 +361,57 @@ async def test_restore_skips_stale_work_time(
     try:
         await restored.async_restore_state(saved)
         assert restored._work_time is None
+    finally:
+        restored.async_shutdown()
+
+
+@freeze_time("2026-09-06 06:00:00")  # Berlin 08:00, alarm fired 20 min ago
+async def test_restart_during_alarm_window_resumes(
+    hass: HomeAssistant, config_entry, store, recorded
+) -> None:
+    """A restart right after the alarm fired must resume, not roll to tomorrow.
+
+    The ringing state is not persisted, so the saved state still reads
+    "scheduled" – the recent past target has to trigger the resume anyway.
+    """
+    now = dt_util.now()
+    saved = {
+        "work_time": "08:00:00",
+        "work_time_day": now.date().isoformat(),
+        "state": "scheduled",
+        "alarm_day": now.date().isoformat(),
+        "alarm_target": (now - timedelta(minutes=20)).isoformat(),
+        "dismissed": [],
+        "stopped": [],
+    }
+    restored = DacCoordinator(hass, config_entry, store=store)
+    try:
+        await restored.async_restore_state(saved)
+        assert restored._state == STATE_RINGING
+        assert any(d == "light" and s == "turn_on" for d, s, _ in recorded)
+    finally:
+        restored.async_shutdown()
+
+
+@freeze_time("2026-09-06 06:00:00")
+async def test_restore_ignores_long_past_alarm(
+    hass: HomeAssistant, config_entry, store, recorded
+) -> None:
+    """An alarm that fired hours ago is not resumed (window is one hour)."""
+    now = dt_util.now()
+    saved = {
+        "work_time": "08:00:00",
+        "work_time_day": now.date().isoformat(),
+        "state": "scheduled",
+        "alarm_day": now.date().isoformat(),
+        "alarm_target": (now - timedelta(hours=3)).isoformat(),
+        "dismissed": [],
+        "stopped": [],
+    }
+    restored = DacCoordinator(hass, config_entry, store=store)
+    try:
+        await restored.async_restore_state(saved)
+        assert restored._state != STATE_RINGING
+        assert not any(d == "light" for d, _, _ in recorded)
     finally:
         restored.async_shutdown()

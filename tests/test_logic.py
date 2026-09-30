@@ -1,12 +1,10 @@
 """Unit tests for the pure DAC logic (no hass required)."""
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
 import pytest
-
-from homeassistant.util import dt as dt_util
 
 from custom_components.dac.logic import (
     compute_alarm_time,
