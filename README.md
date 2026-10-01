@@ -246,10 +246,11 @@ py -m venv .venv
 109 Tests decken die komplette Weck-Logik ab: Offset-Berechnung, Mitternachts-Wrap,
 Fallback-/Cutoff-Semantik inkl. Oversleep-Schutz, Weck-Loop mit einstellbarem
 Intervall, Testmodus (Armen/Klingeln/Abbruch/Stopp), Dismiss, Vacation-Check,
-Reminder, Persistenz, Alexa-Bridge (morgens/abends, Befehlstyp, gezieltes Löschen,
-Vorab-Wecker, Gate-Steuerung, Stopp-Wort/Label), Options-Schema/-Normalisierung,
-HTTP-API (Panel-Aktionen inkl. Testmodus, Entitäts-Vorschläge, Urlaubs-CRUD),
-Seitenleisten-Panel-Registrierung, Config-/Options-Flow und Service-Registrierung.
+Reminder, Persistenz, Alexa-Bridge (morgens/abends, echter Geräte-Wecker ohne TTS,
+gezieltes Löschen, Vorab-Wecker, Gate-Steuerung, Stopp-Wort), Options-Schema und
+-Normalisierung, HTTP-API (Panel-Aktionen inkl. Testmodus, durchsuchbare
+Entitäts-Liste, Urlaubs-CRUD), Registrierung beider Panel-Seiten,
+Config-/Options-Flow und Service-Registrierung.
 
 ## 📄 Lizenz
 
