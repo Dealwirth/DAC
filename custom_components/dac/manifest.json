@@ -4,11 +4,11 @@
   "after_dependencies": [],
   "codeowners": ["@Dealwirth"],
   "config_flow": true,
-  "dependencies": ["http", "frontend", "lovelace", "media_player", "light", "calendar", "notify"],
+  "dependencies": ["http", "frontend", "panel_custom", "media_player", "light", "calendar", "notify"],
   "documentation": "https://github.com/Dealwirth/DAC",
   "integration_type": "hub",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/Dealwirth/DAC/issues",
   "requirements": [],
-  "version": "0.3.0"
+  "version": "0.4.0"
 }

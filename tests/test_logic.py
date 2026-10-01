@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from custom_components.dac.const import DEFAULT_VACATION_KEYWORDS
 from custom_components.dac.logic import (
     compute_alarm_time,
     default_resolution,
@@ -113,13 +114,13 @@ def test_event_marks_vacation_by_keyword():
         datetime(2026, 9, 6, 0, 0, tzinfo=TZ),
         datetime(2026, 9, 7, 0, 0, tzinfo=TZ),
     )
-    assert event_marks_vacation(vac, day)
+    assert event_marks_vacation(vac, day, DEFAULT_VACATION_KEYWORDS)
     work = _event(
         "Frühdienst",
         datetime(2026, 9, 6, 6, 0, tzinfo=TZ),
         datetime(2026, 9, 6, 14, 0, tzinfo=TZ),
     )
-    assert not event_marks_vacation(work, day)
+    assert not event_marks_vacation(work, day, DEFAULT_VACATION_KEYWORDS)
 
 
 def test_event_marks_vacation_all_day_events():
@@ -129,7 +130,7 @@ def test_event_marks_vacation_all_day_events():
         "start": {"date": "2026-12-25"},
         "end": {"date": "2026-12-26"},
     }
-    assert event_marks_vacation(ev, day)
+    assert event_marks_vacation(ev, day, DEFAULT_VACATION_KEYWORDS)
 
 
 def test_event_marks_vacation_description_counts():
@@ -140,4 +141,4 @@ def test_event_marks_vacation_description_counts():
         datetime(2026, 9, 7, 0, 0, tzinfo=TZ),
     )
     ev["description"] = "Feiertag laut Dienstplan"
-    assert event_marks_vacation(ev, day)
+    assert event_marks_vacation(ev, day, DEFAULT_VACATION_KEYWORDS)

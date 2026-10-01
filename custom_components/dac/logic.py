@@ -6,15 +6,6 @@ from typing import Any
 
 from homeassistant.util import dt as dt_util
 
-DEFAULT_VACATION_KEYWORDS: tuple[str, ...] = (
-    "urlaub",
-    "urlaubstag",
-    "feiertag",
-    "ferien",
-    "vacation",
-    "holiday",
-)
-
 
 # --- Alexa text-command helpers ---------------------------------------------
 
@@ -113,7 +104,7 @@ def event_overlaps_day(event: dict[str, Any], day: date) -> bool:
 def event_marks_vacation(
     event: dict[str, Any],
     day: date,
-    keywords: tuple[str, ...] = DEFAULT_VACATION_KEYWORDS,
+    keywords: tuple[str, ...],
 ) -> bool:
     """Return True if a calendar event marks the day as vacation/holiday."""
     if not event_overlaps_day(event, day):

@@ -22,9 +22,12 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    ALEXA_COMMAND_TYPE_CUSTOM,
+    ALEXA_COMMAND_TYPE_TTS,
     ALEXA_SET_TEXT,
     ATTR_DAY,
     ATTR_TIME,
+    CONF_ALEXA_COMMAND_TYPE,
     CONF_ALEXA_ENABLED,
     CONF_ALEXA_ENABLED_BOOLEAN,
     CONF_ALEXA_MEDIA_PLAYER,
@@ -78,6 +81,12 @@ class AlexaBridge:
     @property
     def gate_boolean(self) -> str:
         return str(self._options.get(CONF_ALEXA_ENABLED_BOOLEAN) or DEFAULT_ALEXA_ENABLED_BOOLEAN)
+
+    @property
+    def command_type(self) -> str:
+        """How the text command is sent: 'custom' (text command) or 'tts'."""
+        value = self._options.get(CONF_ALEXA_COMMAND_TYPE)
+        return value if value in (ALEXA_COMMAND_TYPE_CUSTOM, ALEXA_COMMAND_TYPE_TTS) else ALEXA_COMMAND_TYPE_CUSTOM
 
     @property
     def pre_alarm_minutes(self) -> int:
@@ -181,17 +190,17 @@ class AlexaBridge:
     async def async_on_stop(self) -> None:
         """Tag 4: stop the wake loop – kill device alarm, gate and helper text."""
         await self.async_clear_own()
-        try:
-            await self.hass.services.async_call(
-                "input_boolean", "turn_off", {"entity_id": self.gate_boolean}, blocking=True
-            )
-        except Exception as err:  # noqa: BLE001
-            _LOGGER.warning("DAC could not turn off %s: %s", self.gate_boolean, err)
+        await self.async_set_gate(False)
 
     # ------------------------------------------------------------- pre-alarm
     async def async_pre_alarm(self) -> None:
-        """Place a fresh 2-minute device alarm while the wake loop rings."""
-        if not self.enabled or not self.gate_on():
+        """Place a fresh short device alarm while the wake loop rings.
+
+        Unlike the YAML automation this does not depend on the gate: once the
+        alarm fires, the device alarm is re-placed on every loop iteration, so
+        the Echo rings even if Home Assistant drops out afterwards.
+        """
+        if not self.enabled:
             return
         text = ALEXA_SET_TEXT.format(
             time=self.pre_alarm_time_text(), tod=self.pre_alarm_tod()
@@ -224,7 +233,11 @@ class AlexaBridge:
 
     # ------------------------------------------------------------------ io
     async def async_send_text(self, text: str) -> None:
-        """Send a text command to the Echo device."""
+        """Send a text command to the Echo device.
+
+        ``custom`` sends it as a plain Alexa text command (the classic YAML
+        way), ``tts`` lets the device speak it. Both carry the alarm phrasing.
+        """
         player = self.player
         if not player:
             return
@@ -234,13 +247,31 @@ class AlexaBridge:
                 "play_media",
                 {
                     "entity_id": player,
-                    "media_content_type": "tts",
+                    "media_content_type": self.command_type,
                     "media_content_id": text,
                 },
                 blocking=True,
             )
         except Exception as err:  # noqa: BLE001 – Alexa must never break DAC
             _LOGGER.warning("DAC Alexa command failed (%s): %s", player, err)
+
+    async def async_set_gate(self, on: bool) -> None:
+        """Turn the user's wecker_aktiv input_boolean on/off (like Tag 1/Tag 4).
+
+        No-op unless the Alexa bridge is active, so a setup without the bridge
+        never touches the helper.
+        """
+        if not self.enabled:
+            return
+        try:
+            await self.hass.services.async_call(
+                "input_boolean",
+                "turn_on" if on else "turn_off",
+                {"entity_id": self.gate_boolean},
+                blocking=True,
+            )
+        except Exception as err:  # noqa: BLE001 – the gate is a safety net only
+            _LOGGER.debug("DAC could not set %s: %s", self.gate_boolean, err)
 
     async def _async_write_helper(self, value: str) -> None:
         """Store the currently placed alarm in the input_text helper."""

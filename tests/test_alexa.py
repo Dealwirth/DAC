@@ -156,12 +156,16 @@ async def test_on_stop_turns_off_gate(
     )
 
 
-async def test_pre_alarm_requires_gate(
+async def test_pre_alarm_ignores_gate(
     hass: HomeAssistant, coordinator, service_calls: list[tuple[str, str, dict]]
 ) -> None:
-    """The 2-minute pre-alarm only fires while wecker_aktiv is on."""
+    """The pre-alarm fires while ringing even if the gate is off.
+
+    DAC turns the gate on itself when the alarm fires, so the pre-alarm must
+    not depend on it – otherwise a failed gate write could silence the Echo.
+    """
     coordinator._options[CONF_ALEXA_ENABLED] = True
-    _set_state(hass, "input_boolean.wecker_aktiv", "on")
+    _set_state(hass, "input_boolean.wecker_aktiv", "off")
     coordinator._alarm_time = time(6, 0)
 
     await coordinator.alexa.async_pre_alarm()
@@ -170,10 +174,47 @@ async def test_pre_alarm_requires_gate(
     assert texts[0].startswith("stelle einen Wecker auf ")
     assert texts[0].endswith("Uhr morgens") or texts[0].endswith("Uhr abends")
 
-    # Gate off -> no device alarm.
-    _set_state(hass, "input_boolean.wecker_aktiv", "off")
-    await coordinator.alexa.async_pre_alarm()
-    assert len([1 for d, s, _ in service_calls if s == "play_media"]) == 1
+
+async def test_command_type_custom_by_default(coordinator) -> None:
+    """The Alexa command is sent as a plain text command by default."""
+    assert coordinator.alexa.command_type == "custom"
+
+
+async def test_command_type_tts_option(coordinator) -> None:
+    """The command type is configurable and falls back to custom."""
+    from custom_components.dac.const import CONF_ALEXA_COMMAND_TYPE
+
+    coordinator._options[CONF_ALEXA_COMMAND_TYPE] = "tts"
+    assert coordinator.alexa.command_type == "tts"
+    coordinator._options[CONF_ALEXA_COMMAND_TYPE] = "nonsense"
+    assert coordinator.alexa.command_type == "custom"
+
+
+async def test_send_text_uses_command_type(
+    hass: HomeAssistant, coordinator, service_calls: list[tuple[str, str, dict]]
+) -> None:
+    """play_media carries the configured media_content_type."""
+    from custom_components.dac.const import CONF_ALEXA_COMMAND_TYPE
+
+    coordinator._options[CONF_ALEXA_ENABLED] = True
+    coordinator._options[CONF_ALEXA_COMMAND_TYPE] = "custom"
+    await coordinator.alexa.async_send_text("test")
+    assert service_calls[-1][2]["media_content_type"] == "custom"
+
+    coordinator._options[CONF_ALEXA_COMMAND_TYPE] = "tts"
+    await coordinator.alexa.async_send_text("test")
+    assert service_calls[-1][2]["media_content_type"] == "tts"
+
+
+async def test_set_gate_turns_helper_on_and_off(
+    hass: HomeAssistant, coordinator, service_calls: list[tuple[str, str, dict]]
+) -> None:
+    """async_set_gate mirrors the wecker_aktiv helper (Tag 1 / Tag 4)."""
+    coordinator._options[CONF_ALEXA_ENABLED] = True
+    await coordinator.alexa.async_set_gate(True)
+    assert ("input_boolean", "turn_on") in [(d, s) for d, s, _ in service_calls]
+    await coordinator.alexa.async_set_gate(False)
+    assert ("input_boolean", "turn_off") in [(d, s) for d, s, _ in service_calls]
 
 
 def test_pre_alarm_time_text_parses(coordinator) -> None:
