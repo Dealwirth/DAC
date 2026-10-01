@@ -27,18 +27,13 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import (
-    ALEXA_COMMAND_TYPE_CUSTOM,
-    ALEXA_COMMAND_TYPES,
     CONF_ALARM_LIGHTS,
-    CONF_ALARM_VOLUME,
-    CONF_ALEXA_COMMAND_TYPE,
     CONF_ALEXA_ENABLED,
     CONF_ALEXA_ENABLED_BOOLEAN,
     CONF_ALEXA_MEDIA_PLAYER,
     CONF_ALEXA_TEXT_HELPER,
     CONF_DEFAULT_ALARM_TIME,
     CONF_LOOP_INTERVAL_MINUTES,
-    CONF_MEDIA_PLAYERS,
     CONF_NOTIFIER,
     CONF_OFFSET,
     CONF_PRE_ALARM_MINUTES,
@@ -48,10 +43,7 @@ from .const import (
     CONF_TEST_MODE_MINUTES,
     CONF_VACATION_CALENDARS,
     CONF_VACATION_KEYWORDS,
-    CONF_WAKE_TEXT,
     DEFAULT_ALARM_TIME,
-    DEFAULT_ALARM_VOLUME,
-    DEFAULT_ALEXA_COMMAND_TYPE,
     DEFAULT_ALEXA_ENABLED,
     DEFAULT_ALEXA_ENABLED_BOOLEAN,
     DEFAULT_ALEXA_TEXT_HELPER,
@@ -63,7 +55,6 @@ from .const import (
     DEFAULT_STOP_WORD,
     DEFAULT_TEST_MODE_MINUTES,
     DEFAULT_VACATION_KEYWORDS,
-    DEFAULT_WAKE_TEXT,
     MAX_LOOP_INTERVAL_MINUTES,
     MAX_TEST_MODE_MINUTES,
     MIN_LOOP_INTERVAL_MINUTES,
@@ -71,18 +62,15 @@ from .const import (
 
 TIME_KEYS = (CONF_DEFAULT_ALARM_TIME, CONF_REMINDER_TIME)
 INT_KEYS = (CONF_OFFSET, CONF_PRE_ALARM_MINUTES, CONF_LOOP_INTERVAL_MINUTES, CONF_TEST_MODE_MINUTES)
-FLOAT_KEYS = (CONF_ALARM_VOLUME,)
 BOOL_KEYS = (CONF_ALEXA_ENABLED,)
-LIST_KEYS = (CONF_ALARM_LIGHTS, CONF_MEDIA_PLAYERS, CONF_VACATION_CALENDARS)
+LIST_KEYS = (CONF_ALARM_LIGHTS, CONF_VACATION_CALENDARS)
 STR_KEYS = (
     CONF_REMINDER_TEXT,
     CONF_NOTIFIER,
     CONF_ALEXA_MEDIA_PLAYER,
     CONF_ALEXA_TEXT_HELPER,
     CONF_ALEXA_ENABLED_BOOLEAN,
-    CONF_ALEXA_COMMAND_TYPE,
     CONF_STOP_WORD,
-    CONF_WAKE_TEXT,
     CONF_VACATION_KEYWORDS,
 )
 
@@ -90,7 +78,6 @@ STR_KEYS = (
 EDITABLE_KEYS: tuple[str, ...] = (
     *TIME_KEYS,
     *INT_KEYS,
-    *FLOAT_KEYS,
     *BOOL_KEYS,
     *LIST_KEYS,
     *STR_KEYS,
@@ -120,20 +107,16 @@ def default_options() -> dict[str, Any]:
         CONF_REMINDER_TEXT: DEFAULT_REMINDER_TEXT,
         CONF_NOTIFIER: "notify.notify",
         CONF_ALARM_LIGHTS: [],
-        CONF_MEDIA_PLAYERS: [],
         CONF_VACATION_CALENDARS: [],
-        CONF_ALARM_VOLUME: DEFAULT_ALARM_VOLUME,
         CONF_ALEXA_ENABLED: DEFAULT_ALEXA_ENABLED,
         CONF_ALEXA_MEDIA_PLAYER: "",
         CONF_ALEXA_TEXT_HELPER: DEFAULT_ALEXA_TEXT_HELPER,
         CONF_ALEXA_ENABLED_BOOLEAN: DEFAULT_ALEXA_ENABLED_BOOLEAN,
-        CONF_ALEXA_COMMAND_TYPE: DEFAULT_ALEXA_COMMAND_TYPE,
         CONF_PRE_ALARM_MINUTES: DEFAULT_PRE_ALARM_MINUTES,
         CONF_LOOP_INTERVAL_MINUTES: DEFAULT_LOOP_INTERVAL_MINUTES,
         CONF_TEST_MODE_MINUTES: DEFAULT_TEST_MODE_MINUTES,
         CONF_STOP_WORD: DEFAULT_STOP_WORD,
         CONF_VACATION_KEYWORDS: ", ".join(DEFAULT_VACATION_KEYWORDS),
-        CONF_WAKE_TEXT: DEFAULT_WAKE_TEXT,
     }
 
 
@@ -172,13 +155,6 @@ def _as_int(value: Any, fallback: int) -> int:
         return fallback
 
 
-def _as_float(value: Any, fallback: float) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return fallback
-
-
 def coerce_options(data: dict[str, Any], base: dict[str, Any] | None = None) -> dict[str, Any]:
     """Merge incoming panel data over ``base`` and coerce every value.
 
@@ -200,11 +176,6 @@ def coerce_options(data: dict[str, Any], base: dict[str, Any] | None = None) -> 
             if high is not None:
                 value_int = min(high, value_int)
             result[key] = value_int
-        elif key in FLOAT_KEYS:
-            result[key] = max(
-                0.0,
-                min(1.0, _as_float(value, _as_float(result.get(key), DEFAULT_ALARM_VOLUME))),
-            )
         elif key in BOOL_KEYS:
             result[key] = _as_bool(value)
         elif key in LIST_KEYS:
@@ -212,10 +183,6 @@ def coerce_options(data: dict[str, Any], base: dict[str, Any] | None = None) -> 
         elif key == CONF_VACATION_KEYWORDS:
             keywords = _as_list(value)
             result[key] = ", ".join(keywords)
-        elif key == CONF_ALEXA_COMMAND_TYPE:
-            result[key] = (
-                value if value in ALEXA_COMMAND_TYPES else ALEXA_COMMAND_TYPE_CUSTOM
-            )
         else:
             result[key] = "" if value is None else str(value)
     return result
@@ -261,19 +228,9 @@ def build_settings_schema(hass: Any, defaults: dict[str, Any]) -> vol.Schema:
                 description={"suggested_value": defaults.get(CONF_ALARM_LIGHTS, [])},
             ): EntitySelector(EntitySelectorConfig(domain="light", multiple=True)),
             vol.Optional(
-                CONF_MEDIA_PLAYERS,
-                description={"suggested_value": defaults.get(CONF_MEDIA_PLAYERS, [])},
-            ): EntitySelector(EntitySelectorConfig(domain="media_player", multiple=True)),
-            vol.Optional(
                 CONF_VACATION_CALENDARS,
                 description={"suggested_value": defaults.get(CONF_VACATION_CALENDARS, [])},
             ): EntitySelector(EntitySelectorConfig(domain="calendar", multiple=True)),
-            vol.Required(
-                CONF_ALARM_VOLUME,
-                default=defaults.get(CONF_ALARM_VOLUME, DEFAULT_ALARM_VOLUME),
-            ): NumberSelector(
-                NumberSelectorConfig(min=0, max=1, step=0.05, mode=NumberSelectorMode.SLIDER)
-            ),
             vol.Optional(
                 CONF_ALEXA_ENABLED,
                 description={"suggested_value": defaults.get(CONF_ALEXA_ENABLED, False)},
@@ -290,16 +247,6 @@ def build_settings_schema(hass: Any, defaults: dict[str, Any]) -> vol.Schema:
                 CONF_ALEXA_ENABLED_BOOLEAN,
                 default=defaults.get(CONF_ALEXA_ENABLED_BOOLEAN, DEFAULT_ALEXA_ENABLED_BOOLEAN),
             ): EntitySelector(EntitySelectorConfig(domain="input_boolean")),
-            vol.Optional(
-                CONF_ALEXA_COMMAND_TYPE,
-                default=defaults.get(CONF_ALEXA_COMMAND_TYPE, DEFAULT_ALEXA_COMMAND_TYPE),
-            ): SelectSelector(
-                SelectSelectorConfig(
-                    options=list(ALEXA_COMMAND_TYPES),
-                    mode=SelectSelectorMode.DROPDOWN,
-                    translation_key="alexa_command_type",
-                )
-            ),
             vol.Optional(
                 CONF_PRE_ALARM_MINUTES,
                 default=defaults.get(CONF_PRE_ALARM_MINUTES, DEFAULT_PRE_ALARM_MINUTES),
@@ -337,10 +284,6 @@ def build_settings_schema(hass: Any, defaults: dict[str, Any]) -> vol.Schema:
             vol.Optional(
                 CONF_VACATION_KEYWORDS,
                 default=defaults.get(CONF_VACATION_KEYWORDS, ", ".join(DEFAULT_VACATION_KEYWORDS)),
-            ): TextSelector(TextSelectorConfig(multiline=True, type=TextSelectorType.TEXT)),
-            vol.Optional(
-                CONF_WAKE_TEXT,
-                default=defaults.get(CONF_WAKE_TEXT, DEFAULT_WAKE_TEXT),
             ): TextSelector(TextSelectorConfig(multiline=True, type=TextSelectorType.TEXT)),
         }
     )

@@ -1,17 +1,16 @@
 /**
- * DAC – Dynamic Alarm Clock · Sidebar-Panel (dac-panel)
+ * DAC – Dynamic Alarm Clock · Sidebar-Panels
  *
- * Vollständige Verwaltung der Integration auf einer Seite: Wecker, Modus,
- * Testmodus, Alexa, Urlaubskalender und alle Einstellungen. Nutzt die
- * DAC-HTTP-API über hass.callApi("GET"|"POST", "dac") und das Design von
- * Home Assistant gemischt mit der Amazon-/Alexa-Farbwelt (Navy + Orange).
+ * Zwei Seiten, ein Modul:
+ *   <dac-panel>          – /dac           Steuerung: Wecker, Testmodus, Modus, Urlaub
+ *   <dac-settings-panel> – /dac-settings  Einstellungen auf eigener Seite
  *
- * Zeitwahl: native <input type="time"> plus Schnellwahl-Chips – kein eigenes
- * Zifferblatt-Rad mehr.
- * Entitäten: pro Feld werden die vorhandenen Geräte als <datalist> und als
- * anklickbare Vorschlags-Chips angeboten.
+ * Entitäten werden über ein Suchfeld mit Live-Vorschlägen gewählt
+ * (Tippen filtert über ALLE Entitäten, Klick übernimmt) – wie im
+ * klassischen YAML-Skript, nur komfortabler.
+ * Der Testmodus ist direkt in die Steuerungsseite integriert.
  */
-const DAC_VERSION = "0.5.0";
+const DAC_VERSION = "0.6.0";
 const DAC_AMBER = "#ff9900";
 const DAC_NAVY = "#232f3e";
 
@@ -21,15 +20,23 @@ const MONTHS = [
   "Juli", "August", "September", "Oktober", "November", "Dezember",
 ];
 
-// Welche Option gehört zu welcher Entity-Gruppe aus dem API-Payload?
-const ENTITY_GROUPS = {
-  alarm_lights: "lights",
-  media_players: "media_players",
-  vacation_calendars: "calendars",
-  notifier: "notifiers",
-  alexa_media_player: "media_players",
-  alexa_text_helper: "input_text",
-  alexa_enabled_boolean: "input_boolean",
+// Der Server liefert eine flache Liste aller Entitäten; pro Feld wird nach
+// diesen Domains gefiltert (null = alle Domains durchsuchbar).
+const FIELD_DOMAINS = {
+  alarm_lights: ["light", "switch"],
+  vacation_calendars: ["calendar"],
+  alexa_media_player: ["media_player"],
+  alexa_text_helper: ["input_text"],
+  alexa_enabled_boolean: ["input_boolean"],
+};
+
+// Bekannte Beispiele, falls ein Feld noch keine Entitäten kennt.
+const FIELD_EXAMPLES = {
+  alarm_lights: "light.schlafzimmer",
+  vacation_calendars: "calendar.feiertage",
+  alexa_media_player: "media_player.echo",
+  alexa_text_helper: "input_text.gestellter_alexa_wecker",
+  alexa_enabled_boolean: "input_boolean.wecker_aktiv",
 };
 
 function esc(value) {
@@ -106,7 +113,15 @@ function listToText(value) {
   return value || "";
 }
 
-class DacPanel extends HTMLElement {
+function matchesEntity(item, query, domains) {
+  if (domains && domains.length && !domains.includes(item.domain)) return false;
+  if (!query) return true;
+  const q = query.toLowerCase();
+  return item.id.toLowerCase().includes(q) || (item.name || "").toLowerCase().includes(q);
+}
+
+/** Basisklasse: lädt den API-Zustand und hält die Einstellungen. */
+class DacBase extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
@@ -115,11 +130,8 @@ class DacPanel extends HTMLElement {
     this._error = null;
     this._busy = false;
     this._entryIndex = 0;
-    this._month = new Date();
-    this._selected = new Set();
     this._settings = {};
     this._dirty = false;
-    this._clock = null;
   }
 
   set hass(hass) {
@@ -131,20 +143,6 @@ class DacPanel extends HTMLElement {
   set panel(panel) { this._panel = panel; }
   set narrow(narrow) { this._narrow = narrow; }
 
-  connectedCallback() {
-    this._render();
-    // Kein Dauer-Polling: der Server ist Single-Source-of-Truth und wird nach
-    // jeder Aktion neu geladen. Die Uhr/Countdown laufen rein lokal.
-    this._clock = setInterval(() => this._tick(), 1000);
-  }
-
-  disconnectedCallback() {
-    clearInterval(this._clock);
-  }
-
-  getCardSize() { return 20; }
-
-  // ------------------------------------------------------------------- data
   entries() {
     return (this._data && this._data.entries) || [];
   }
@@ -153,6 +151,10 @@ class DacPanel extends HTMLElement {
     const list = this.entries();
     if (!list.length) return null;
     return list[Math.min(this._entryIndex, list.length - 1)];
+  }
+
+  entities() {
+    return (this.entry() && this.entry().entities) || [];
   }
 
   async _refresh() {
@@ -184,6 +186,192 @@ class DacPanel extends HTMLElement {
     await this._refresh();
   }
 
+  _errorView() {
+    return `<style>${STYLES}</style>
+      <div class="wrap"><div class="banner error">⚠️ ${esc(this._error)}</div></div>`;
+  }
+
+  _emptyView() {
+    return `<style>${STYLES}</style>
+      <div class="wrap"><div class="empty">
+        <h2>DAC ist noch nicht eingerichtet</h2>
+        <p>Einstellungen → Geräte &amp; Dienste → Integration hinzufügen → „DAC“.</p>
+      </div></div>`;
+  }
+
+  _tabs() {
+    if (this.entries().length <= 1) return "";
+    return `<div class="tabs">${this.entries().map((e, i) =>
+      `<button class="tab ${i === this._entryIndex ? "on" : ""}" data-entry="${i}">${esc(e.entry_id.slice(0, 6))}</button>`).join("")}</div>`;
+  }
+
+  _wireTabs() {
+    this.shadowRoot.querySelectorAll("[data-entry]").forEach((btn) =>
+      btn.onclick = () => {
+        this._entryIndex = Number(btn.dataset.entry) || 0;
+        this._settings = { ...(this.entry()?.settings || {}) };
+        this._dirty = false;
+        this._render();
+      });
+  }
+
+  // ------------------------------------------------------- entity search UI
+  /** Ein Entity-Feld: Suchfeld + Live-Vorschläge (Klick übernimmt). */
+  _entityField(key, label, value, { multi = false } = {}) {
+    const domains = FIELD_DOMAINS[key] || null;
+    const current = listToText(value);
+    const placeholder = FIELD_EXAMPLES[key] || "suchen…";
+    return `<div class="field entity-field" data-efield="${key}">
+      <span>${esc(label)}</span>
+      <input class="inp search" type="text" data-field="${key}" data-multi="${multi ? "true" : "false"}"
+        autocomplete="off" value="${esc(current)}" placeholder="${esc(placeholder)}" />
+      <input class="inp suggest-input" type="text" data-suggest="${key}" autocomplete="off"
+        placeholder="🔍 suchen – Vorschläge erscheinen beim Tippen" />
+      <div class="suggestions" data-suggestions="${key}"></div>
+      ${multi ? `<span class="hint">Mehrere mit Komma trennen.</span>` : ""}
+    </div>`;
+  }
+
+  /** Vorschlagsliste für ein Suchfeld neu aufbauen. */
+  _updateSuggestions(key) {
+    const box = this.shadowRoot.querySelector(`[data-suggestions="${key}"]`);
+    const input = this.shadowRoot.querySelector(`[data-suggest="${key}"]`);
+    if (!box) return;
+    const query = (input && input.value || "").trim();
+    const domains = FIELD_DOMAINS[key] || null;
+    const chosen = new Set(
+      String(this._settings[key] || "").split(",").map((p) => p.trim()).filter(Boolean)
+    );
+    const items = this.entities()
+      .filter((item) => matchesEntity(item, query, domains))
+      .filter((item) => !chosen.has(item.id))
+      .slice(0, 8);
+    if (!items.length) {
+      box.innerHTML = `<span class="muted">Keine passenden Entitäten.</span>`;
+      return;
+    }
+    box.innerHTML = items.map((item) =>
+      `<button class="chip suggest" data-pick="${key}" data-value="${esc(item.id)}">
+        ${esc(item.name)} <em>${esc(item.id)}</em></button>`).join("");
+    box.querySelectorAll("[data-pick]").forEach((btn) =>
+      btn.onclick = () => this._pickEntity(key, btn.dataset.value));
+  }
+
+  _pickEntity(key, value) {
+    const field = this.shadowRoot.querySelector(`[data-field="${key}"]`);
+    const multi = field && field.dataset.multi === "true";
+    const parts = String(this._settings[key] || "")
+      .split(",").map((p) => p.trim()).filter(Boolean);
+    if (multi) {
+      if (!parts.includes(value)) parts.push(value);
+      this._settings[key] = parts.join(", ");
+    } else {
+      this._settings[key] = value;
+    }
+    if (field) field.value = this._settings[key];
+    const search = this.shadowRoot.querySelector(`[data-suggest="${key}"]`);
+    if (search) search.value = "";
+    this._dirty = true;
+    this._refreshDirty();
+    this._updateSuggestions(key);
+  }
+
+  _wireEntityFields() {
+    this.shadowRoot.querySelectorAll("[data-suggest]").forEach((input) => {
+      const key = input.dataset.suggest;
+      input.oninput = () => this._updateSuggestions(key);
+      input.onfocus = () => this._updateSuggestions(key);
+    });
+    Object.keys(FIELD_DOMAINS).forEach((key) => {
+      if (this.shadowRoot.querySelector(`[data-suggestions="${key}"]`)) {
+        this._updateSuggestions(key);
+      }
+    });
+  }
+
+  // ------------------------------------------------------- common form wiring
+  _wireSettingsFields() {
+    this.shadowRoot.querySelectorAll("[data-field]").forEach((input) => {
+      const key = input.dataset.field;
+      if (input.dataset.suggest) return;
+      input.oninput = () => {
+        const value = input.type === "checkbox" ? input.checked : input.value;
+        this._settings[key] = input.classList.contains("time") && value ? `${value}:00` : value;
+        this._dirty = true;
+        this._refreshDirty();
+      };
+      input.onchange = input.oninput;
+    });
+    this.shadowRoot.querySelectorAll("select[data-field]").forEach((select) => {
+      select.onchange = () => {
+        this._settings[select.dataset.field] = select.value;
+        this._dirty = true;
+        this._refreshDirty();
+      };
+    });
+  }
+
+  _refreshDirty() {
+    const el = this.shadowRoot.querySelector(".dirty");
+    if (!el) return;
+    el.classList.toggle("on", this._dirty);
+    el.textContent = this._dirty ? "Ungespeicherte Änderungen" : "Alles gespeichert";
+  }
+
+  // ------------------------------------------------------------ field builder
+  _fieldTime(key, label, value) {
+    return `<label class="field">
+      <span>${esc(label)}</span>
+      <input class="inp time" type="time" data-field="${key}" value="${hm(value)}" />
+    </label>`;
+  }
+
+  _fieldNumber(key, label, value, min, max, step, unit) {
+    return `<label class="field">
+      <span>${esc(label)}${unit ? ` (${esc(unit)})` : ""}</span>
+      <input type="number" data-field="${key}" value="${esc(value ?? "")}"
+        min="${min}" max="${max}" step="${step}" />
+    </label>`;
+  }
+
+  _fieldText(key, label, value, placeholder) {
+    return `<label class="field">
+      <span>${esc(label)}</span>
+      <input type="text" data-field="${key}" value="${esc(value ?? "")}"
+        placeholder="${esc(placeholder || "")}" />
+    </label>`;
+  }
+
+  _fieldSwitch(key, label, value) {
+    return `<label class="switch">
+      <input type="checkbox" data-field="${key}" ${value ? "checked" : ""} />
+      <span>${esc(label)}</span>
+    </label>`;
+  }
+}
+
+/* ==========================================================================
+ * Steuerungsseite  (/dac)
+ * ========================================================================== */
+class DacPanel extends DacBase {
+  constructor() {
+    super();
+    this._month = new Date();
+    this._selected = new Set();
+    this._clock = null;
+  }
+
+  connectedCallback() {
+    this._render();
+    this._clock = setInterval(() => this._tick(), 1000);
+  }
+
+  disconnectedCallback() {
+    clearInterval(this._clock);
+  }
+
+  getCardSize() { return 20; }
+
   _tick() {
     const clock = this.shadowRoot.querySelector(".clock");
     if (clock) clock.textContent = clockNow();
@@ -198,22 +386,10 @@ class DacPanel extends HTMLElement {
     return countdown(entry.alarm_target) || "kein Wecker aktiv";
   }
 
-  // ----------------------------------------------------------------- render
   _render() {
-    if (this._error) {
-      this.shadowRoot.innerHTML = `<style>${STYLES}</style>
-        <div class="wrap"><div class="banner error">⚠️ ${esc(this._error)}</div></div>`;
-      return;
-    }
+    if (this._error) { this.shadowRoot.innerHTML = this._errorView(); return; }
     const entry = this.entry();
-    if (!entry) {
-      this.shadowRoot.innerHTML = `<style>${STYLES}</style>
-        <div class="wrap"><div class="empty">
-          <h2>DAC ist noch nicht eingerichtet</h2>
-          <p>Einstellungen → Geräte &amp; Dienste → Integration hinzufügen → „DAC“.</p>
-        </div></div>`;
-      return;
-    }
+    if (!entry) { this.shadowRoot.innerHTML = this._emptyView(); return; }
     this.shadowRoot.innerHTML = `<style>${STYLES}</style>${this._body(entry)}<div id="dialog"></div>`;
     this._wire();
   }
@@ -221,20 +397,15 @@ class DacPanel extends HTMLElement {
   _body(entry) {
     const status = statusOf(entry);
     const ringing = entry.state === "ringing";
-    const s = this._settings;
     const cal = entry.calendar || { own: [], external: [] };
     const alexa = entry.alexa || {};
-    const tabs = this.entries().length > 1
-      ? `<div class="tabs">${this.entries().map((e, i) =>
-          `<button class="tab ${i === this._entryIndex ? "on" : ""}" data-entry="${i}">${esc(e.entry_id.slice(0, 6))}</button>`).join("")}</div>`
-      : "";
 
     return `
     <div class="wrap">
       <header class="hero tone-${status.tone}">
         <div class="hero-top">
           <span class="brand">⏰ DAC</span>
-          <span class="pill">${esc(modeLabel(entry.mode))}${entry.test_mode ? " · Test" : ""}</span>
+          <a class="pill link" href="/dac-settings">⚙️ Einstellungen</a>
         </div>
         <div class="clock">${clockNow()}</div>
         <div class="status"><span class="dot"></span>${esc(status.label)}</div>
@@ -247,36 +418,21 @@ class DacPanel extends HTMLElement {
       </header>
 
       <div class="grid">
-        ${this._cardWorkTime(entry, s)}
-        ${this._cardTestMode(entry, s)}
+        ${this._cardWorkTime(entry, this._settings)}
+        ${this._cardTestMode(entry, this._settings)}
         ${this._cardMode(entry)}
         ${this._cardAlexa(alexa)}
       </div>
 
       <section class="card wide">
-        <h3>Einstellungen</h3>
-        <div class="fieldsets">
-          ${this._fieldsetZeiten(s)}
-          ${this._fieldsetGeraete(s)}
-          ${this._fieldsetAlexa(s)}
-        </div>
-        <div class="row end">
-          <span class="dirty ${this._dirty ? "on" : ""}">${this._dirty ? "Ungespeicherte Änderungen" : "Alles gespeichert"}</span>
-          <button class="btn" id="save-settings">Einstellungen speichern</button>
-        </div>
-      </section>
-
-      <section class="card wide">
         <h3>Urlaubskalender</h3>
         ${this._calendar(cal)}
       </section>
-      ${tabs}
-      <div class="foot">DAC ${esc(DAC_VERSION)} · Alle Einstellungen werden hier gespeichert – der Einrichtungsassistent fragt nichts ab.</div>
-      ${this._datalists(entry)}
+      ${this._tabs()}
+      <div class="foot">DAC ${esc(DAC_VERSION)} · Einstellungen auf der eigenen Seite „DAC Einstellungen“.</div>
     </div>`;
   }
 
-  // ------------------------------------------------------------------- cards
   _cardWorkTime(entry, s) {
     const quick = ["04:00", "05:00", "06:00", "06:30", "07:00", "08:00"];
     return `
@@ -299,24 +455,20 @@ class DacPanel extends HTMLElement {
   }
 
   _cardTestMode(entry, s) {
-    if (entry.test_mode) {
-      return `
-        <section class="card">
-          <h3>Testmodus <span class="badge">aktiv</span></h3>
-          <p class="muted">Der Testwecker klingelt um ${timeOf(entry.test_target)} – mit Licht, Echo und Wiederholung wie der echte Wecker.</p>
-          <div class="row"><button class="btn danger" id="test-cancel">Testwecker abbrechen</button></div>
-        </section>`;
-    }
+    const active = entry.test_mode;
     return `
-      <section class="card">
-        <h3>Testmodus</h3>
-        <p class="muted">Klingelt in X Minuten – prüft die komplette Kette (Licht, Echo, Wiederholung). Gestoppt wird wie der echte Wecker.</p>
-        <div class="row">
-          <input class="inp small" type="number" id="test-minutes" min="1" max="120"
-            value="${esc(s.test_mode_minutes ?? 1)}" />
-          <span class="muted">Minuten</span>
-          <button class="btn" id="test-start">Testwecker starten</button>
-        </div>
+      <section class="card ${active ? "test-on" : ""}">
+        <h3>Testmodus ${active ? `<span class="badge">aktiv</span>` : ""}</h3>
+        ${active
+          ? `<p class="muted">Der Testwecker klingelt um <b>${timeOf(entry.test_target)}</b> – mit Licht und Echo wie der echte Wecker.</p>
+             <div class="row"><button class="btn danger" id="test-cancel">Testwecker abbrechen</button></div>`
+          : `<p class="muted">Klingelt in X Minuten – prüft die komplette Kette (Licht, Echo, Wiederholung).</p>
+             <div class="row">
+               <input class="inp small" type="number" id="test-minutes" min="1" max="120"
+                 value="${esc(s.test_mode_minutes ?? 1)}" />
+               <span class="muted">Minuten</span>
+               <button class="btn" id="test-start">Testwecker starten</button>
+             </div>`}
       </section>`;
   }
 
@@ -349,130 +501,12 @@ class DacPanel extends HTMLElement {
         <p class="hint">
           Stoppen per Sprache: In der Alexa-App eine Routine <b>„${esc(routine)}“</b> anlegen –
           Auslöser „Wecker mit dem Namen <b>${esc(stopWord)}</b> klingelt“, Aktion „Smart-Home-Gerät“ → DAC → Wecker stoppen.
-          DAC benennt seine Echo-Wecker mit genau diesem Stopp-Wort.
+          DAC benennt seine Echo-Wecker mit genau diesem Namen.
         </p>
-        ${alexa.enabled ? "" : `<p class="hint">Aktiviere Alexa unten in den Einstellungen und wähle deinen Echo.</p>`}
+        ${alexa.enabled ? "" : `<p class="hint">Aktiviere Alexa auf der Seite <a href="/dac-settings">DAC Einstellungen</a> und wähle deinen Echo.</p>`}
       </section>`;
   }
 
-  // ------------------------------------------------------------- fieldsets
-  _fieldsetZeiten(s) {
-    return `
-      <fieldset class="fieldset">
-        <legend>Zeiten &amp; Weckzyklus</legend>
-        <div class="fields">
-          ${this._fieldTime("default_alarm_time", "Standard-Weckzeit (Fallback)", s.default_alarm_time)}
-          ${this._fieldNumber("offset_minutes", "Offset vor Arbeitsbeginn", s.offset_minutes, 0, 600, 5, "min")}
-          ${this._fieldTime("reminder_time", "Tägliche Erinnerung", s.reminder_time)}
-          ${this._fieldNumber("loop_interval_minutes", "Weck-Wiederholung", s.loop_interval_minutes, 1, 60, 1, "min")}
-          ${this._fieldNumber("test_mode_minutes", "Testwecker nach", s.test_mode_minutes, 1, 120, 1, "min")}
-          ${this._fieldText("wake_text", "Weck-Ansage", s.wake_text, "Guten Morgen!")}
-          ${this._fieldText("reminder_text", "Erinnerungstext ({alarm_time})", s.reminder_text, "Denk an die Arbeitszeit!")}
-          ${this._fieldText("vacation_keywords", "Urlaubs-Schlagwörter (Komma-getrennt)", s.vacation_keywords, "urlaub, feiertag")}
-        </div>
-      </fieldset>`;
-  }
-
-  _fieldsetGeraete(s) {
-    return `
-      <fieldset class="fieldset">
-        <legend>Geräte &amp; Benachrichtigung</legend>
-        <div class="fields">
-          ${this._fieldMulti("alarm_lights", "Weck-Lichter", s.alarm_lights, "light.schlafzimmer")}
-          ${this._fieldMulti("media_players", "Weck-Lautsprecher", s.media_players, "media_player.echo")}
-          ${this._fieldText("notifier", "Benachrichtigungsdienst", s.notifier, "notify.mobile_app_…")}
-          ${this._fieldMulti("vacation_calendars", "Externe Urlaubskalender", s.vacation_calendars, "calendar.feiertage")}
-          ${this._fieldNumber("alarm_volume", "Lautstärke (0–1)", s.alarm_volume, 0, 1, 0.05)}
-        </div>
-      </fieldset>`;
-  }
-
-  _fieldsetAlexa(s) {
-    return `
-      <fieldset class="fieldset">
-        <legend>Alexa (Echo-Wecker)</legend>
-        <div class="fields">
-          <label class="switch">
-            <input type="checkbox" data-field="alexa_enabled" ${s.alexa_enabled ? "checked" : ""} />
-            <span>Echten Wecker auf dem Echo stellen</span>
-          </label>
-          ${this._fieldText("alexa_media_player", "Echo (alexa_media)", s.alexa_media_player, "media_player.echo")}
-          ${this._fieldText("alexa_text_helper", "Helfer: gesetzter Wecker", s.alexa_text_helper, "input_text.gestellter_alexa_wecker")}
-          ${this._fieldText("alexa_enabled_boolean", "Helfer: Wecker aktiv", s.alexa_enabled_boolean, "input_boolean.wecker_aktiv")}
-          ${this._fieldSelect("alexa_command_type", "Alexa-Befehlstyp", s.alexa_command_type, [
-            ["custom", "custom – Textbefehl (empfohlen)"],
-            ["tts", "tts – gesprochen"],
-          ])}
-          ${this._fieldNumber("pre_alarm_minutes", "Vorab-Wecker Echo", s.pre_alarm_minutes, 0, 30, 1, "min")}
-          ${this._fieldText("stop_word", "Stopp-Wort (Alexa-Weckername)", s.stop_word, "Wecker aus")}
-        </div>
-      </fieldset>`;
-  }
-
-  // ------------------------------------------------------------ field builder
-  _listId(key) {
-    return ENTITY_GROUPS[key] ? `dl-${key}` : null;
-  }
-
-  _datalists(entry) {
-    const groups = entry.entities || {};
-    return Object.entries(ENTITY_GROUPS).map(([key, group]) => {
-      const items = groups[group] || [];
-      if (!items.length) return "";
-      return `<datalist id="dl-${key}">${items.map((i) =>
-        `<option value="${esc(i.id)}">${esc(i.name)}</option>`).join("")}</datalist>`;
-    }).join("");
-  }
-
-  _fieldTime(key, label, value) {
-    return `<label class="field">
-      <span>${esc(label)}</span>
-      <input class="inp time" type="time" data-field="${key}" value="${hm(value)}" />
-    </label>`;
-  }
-
-  _fieldNumber(key, label, value, min, max, step, unit) {
-    return `<label class="field">
-      <span>${esc(label)}${unit ? ` (${esc(unit)})` : ""}</span>
-      <input type="number" data-field="${key}" value="${esc(value ?? "")}"
-        min="${min}" max="${max}" step="${step}" />
-    </label>`;
-  }
-
-  _fieldText(key, label, value, placeholder) {
-    const list = this._listId(key);
-    return `<label class="field">
-      <span>${esc(label)}</span>
-      <input type="text" data-field="${key}" value="${esc(value ?? "")}"
-        placeholder="${esc(placeholder || "")}" ${list ? `list="${list}"` : ""} />
-    </label>`;
-  }
-
-  _fieldMulti(key, label, value, placeholder) {
-    const list = this._listId(key);
-    const group = ENTITY_GROUPS[key];
-    const suggestions = (this.entry()?.entities?.[group] || []).slice(0, 6);
-    const current = listToText(value);
-    return `<label class="field">
-      <span>${esc(label)}</span>
-      <input type="text" data-field="${key}" value="${esc(current)}"
-        placeholder="${esc(placeholder || "")}" ${list ? `list="${list}"` : ""} />
-      ${suggestions.length ? `<span class="chips small">${suggestions.map((i) =>
-        `<button class="chip" data-append="${key}" data-value="${esc(i.id)}">+ ${esc(i.name)}</button>`).join("")}</span>` : ""}
-    </label>`;
-  }
-
-  _fieldSelect(key, label, value, options) {
-    return `<label class="field">
-      <span>${esc(label)}</span>
-      <select data-field="${key}">
-        ${options.map(([val, text]) =>
-          `<option value="${esc(val)}" ${String(value ?? "") === val ? "selected" : ""}>${esc(text)}</option>`).join("")}
-      </select>
-    </label>`;
-  }
-
-  // -------------------------------------------------------------- calendar
   _calendar(cal) {
     const own = {};
     (cal.own || []).forEach((d) => { own[d.date] = d; });
@@ -539,7 +573,6 @@ class DacPanel extends HTMLElement {
       </div>`;
   }
 
-  // ------------------------------------------------------------ interaction
   _wire() {
     const q = (sel) => this.shadowRoot.querySelector(sel);
     const stop = q("#stop");
@@ -576,39 +609,6 @@ class DacPanel extends HTMLElement {
     const alexaClear = q("#alexa-clear");
     if (alexaClear) alexaClear.onclick = () => this._action({ action: "alexa_clear" });
 
-    this.shadowRoot.querySelectorAll("[data-field]").forEach((input) =>
-      input.oninput = () => {
-        const key = input.dataset.field;
-        const value = input.type === "checkbox" ? input.checked : input.value;
-        this._settings[key] = input.classList.contains("time") && value ? `${value}:00` : value;
-        this._dirty = true;
-        this._refreshDirty();
-      });
-    this.shadowRoot.querySelectorAll("select[data-field]").forEach((select) =>
-      select.onchange = () => {
-        this._settings[select.dataset.field] = select.value;
-        this._dirty = true;
-        this._refreshDirty();
-      });
-
-    this.shadowRoot.querySelectorAll("[data-append]").forEach((btn) =>
-      btn.onclick = () => {
-        const key = btn.dataset.append;
-        const value = btn.dataset.value;
-        const field = this.shadowRoot.querySelector(`[data-field="${key}"]`);
-        const parts = String(field.value || "").split(",").map((p) => p.trim()).filter(Boolean);
-        if (!parts.includes(value)) parts.push(value);
-        field.value = parts.join(", ");
-        this._settings[key] = field.value;
-        this._dirty = true;
-        this._refreshDirty();
-      });
-
-    const save = q("#save-settings");
-    if (save) save.onclick = () => {
-      this._action({ action: "save_settings", settings: this._settings });
-    };
-
     const prev = q("#cal-prev");
     if (prev) prev.onclick = () => { this._month = new Date(this._month.getFullYear(), this._month.getMonth() - 1, 1); this._render(); };
     const next = q("#cal-next");
@@ -641,31 +641,123 @@ class DacPanel extends HTMLElement {
     this.shadowRoot.querySelectorAll("[data-remove]").forEach((btn) =>
       btn.onclick = () => this._action({ action: "remove_vacation", uid: btn.dataset.remove }));
 
-    this.shadowRoot.querySelectorAll("[data-entry]").forEach((btn) =>
-      btn.onclick = () => {
-        this._entryIndex = Number(btn.dataset.entry) || 0;
-        this._settings = { ...(this.entry()?.settings || {}) };
-        this._dirty = false;
-        this._render();
-      });
-  }
-
-  _refreshDirty() {
-    const el = this.shadowRoot.querySelector(".dirty");
-    if (!el) return;
-    el.classList.toggle("on", this._dirty);
-    el.textContent = this._dirty ? "Ungespeicherte Änderungen" : "Alles gespeichert";
+    this._wireTabs();
   }
 
   _selectRange(fromIso, toIso) {
-    const from = new Date(fromIso);
-    const to = new Date(toIso);
+    const parse = (iso) => {
+      const [y, m, d] = String(iso).split("-").map(Number);
+      return new Date(y, m - 1, d);
+    };
+    const from = parse(fromIso);
+    const to = parse(toIso);
     const start = from <= to ? from : to;
     const end = from <= to ? to : from;
     this._selected.clear();
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
       this._selected.add(localIso(d));
     }
+  }
+}
+
+/* ==========================================================================
+ * Einstellungsseite  (/dac-settings)
+ * ========================================================================== */
+class DacSettingsPanel extends DacBase {
+  connectedCallback() {
+    this._render();
+    this._refresh();
+  }
+
+  getCardSize() { return 20; }
+
+  _render() {
+    if (this._error) { this.shadowRoot.innerHTML = this._errorView(); return; }
+    const entry = this.entry();
+    if (!entry) { this.shadowRoot.innerHTML = this._emptyView(); return; }
+    this.shadowRoot.innerHTML = `<style>${STYLES}</style>${this._body(entry)}`;
+    this._wire();
+  }
+
+  _body(entry) {
+    const s = this._settings;
+    return `
+    <div class="wrap">
+      <header class="hero tone-settings">
+        <div class="hero-top">
+          <span class="brand">⚙️ DAC Einstellungen</span>
+          <a class="pill link" href="/dac">⏰ Steuerung</a>
+        </div>
+        <div class="status"><span class="dot"></span>Alles hier speichern – der Einrichtungsassistent fragt nichts ab.</div>
+      </header>
+
+      <section class="card wide">
+        <div class="fieldsets">
+          ${this._fieldsetZeiten(s)}
+          ${this._fieldsetGeraete(s)}
+          ${this._fieldsetAlexa(s)}
+        </div>
+        <div class="row end">
+          <span class="dirty ${this._dirty ? "on" : ""}">${this._dirty ? "Ungespeicherte Änderungen" : "Alles gespeichert"}</span>
+          <button class="btn" id="save-settings">Einstellungen speichern</button>
+        </div>
+      </section>
+      ${this._tabs()}
+      <div class="foot">DAC ${esc(DAC_VERSION)}</div>
+    </div>`;
+  }
+
+  _fieldsetZeiten(s) {
+    return `
+      <fieldset class="fieldset">
+        <legend>Zeiten &amp; Weckzyklus</legend>
+        <div class="fields">
+          ${this._fieldTime("default_alarm_time", "Standard-Weckzeit (Fallback)", s.default_alarm_time)}
+          ${this._fieldNumber("offset_minutes", "Offset vor Arbeitsbeginn", s.offset_minutes, 0, 600, 5, "min")}
+          ${this._fieldNumber("loop_interval_minutes", "Weck-Wiederholung", s.loop_interval_minutes, 1, 60, 1, "min")}
+          ${this._fieldNumber("test_mode_minutes", "Testwecker nach", s.test_mode_minutes, 1, 120, 1, "min")}
+          ${this._fieldTime("reminder_time", "Tägliche Erinnerung", s.reminder_time)}
+          ${this._fieldText("reminder_text", "Erinnerungstext ({alarm_time})", s.reminder_text, "Denk an die Arbeitszeit!")}
+          ${this._fieldText("vacation_keywords", "Urlaubs-Schlagwörter (Komma-getrennt)", s.vacation_keywords, "urlaub, feiertag")}
+        </div>
+      </fieldset>`;
+  }
+
+  _fieldsetGeraete(s) {
+    return `
+      <fieldset class="fieldset">
+        <legend>Geräte &amp; Benachrichtigung</legend>
+        <div class="fields">
+          ${this._entityField("alarm_lights", "Weck-Lichter", s.alarm_lights, { multi: true })}
+          ${this._entityField("vacation_calendars", "Externe Urlaubskalender", s.vacation_calendars, { multi: true })}
+          ${this._fieldText("notifier", "Benachrichtigungsdienst", s.notifier, "notify.mobile_app_…")}
+        </div>
+      </fieldset>`;
+  }
+
+  _fieldsetAlexa(s) {
+    return `
+      <fieldset class="fieldset">
+        <legend>Alexa (Echo-Wecker)</legend>
+        <div class="fields">
+          ${this._fieldSwitch("alexa_enabled", "Echten Wecker auf dem Echo stellen", s.alexa_enabled)}
+          ${this._entityField("alexa_media_player", "Echo", s.alexa_media_player)}
+          ${this._entityField("alexa_text_helper", "Helfer: gesetzter Wecker", s.alexa_text_helper)}
+          ${this._entityField("alexa_enabled_boolean", "Helfer: Wecker aktiv", s.alexa_enabled_boolean)}
+          ${this._fieldNumber("pre_alarm_minutes", "Vorab-Wecker Echo", s.pre_alarm_minutes, 0, 30, 1, "min")}
+          ${this._fieldText("stop_word", "Stopp-Wort (Name des Echo-Weckers)", s.stop_word, "Wecker aus")}
+        </div>
+      </fieldset>`;
+  }
+
+  _wire() {
+    this._wireSettingsFields();
+    this._wireEntityFields();
+    this._wireTabs();
+
+    const save = this.shadowRoot.querySelector("#save-settings");
+    if (save) save.onclick = () =>
+      this._action({ action: "save_settings", settings: this._settings });
   }
 }
 
@@ -678,10 +770,13 @@ const STYLES = `
   .tone-test { background: linear-gradient(135deg, #0f7b6c, ${DAC_NAVY}); }
   .tone-vacation { background: linear-gradient(135deg, #0f7b6c, ${DAC_NAVY}); }
   .tone-dismissed, .tone-stopped { background: linear-gradient(135deg, #4a5568, ${DAC_NAVY}); }
+  .tone-settings { background: linear-gradient(135deg, #37475a, ${DAC_NAVY}); }
   @keyframes pulse { 50% { filter: brightness(1.22); } }
   .hero-top { display: flex; justify-content: space-between; align-items: center; }
   .brand { font-weight: 800; letter-spacing: 2px; }
   .pill { background: rgba(255,255,255,.18); padding: 3px 12px; border-radius: 999px; font-size: 12px; }
+  .pill.link { color: #fff; text-decoration: none; }
+  .pill.link:hover { background: rgba(255,255,255,.3); }
   .clock { font-size: 54px; font-weight: 200; margin: 8px 0 0; font-variant-numeric: tabular-nums; }
   .status { opacity: .92; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: ${DAC_AMBER}; box-shadow: 0 0 0 4px rgba(255,153,0,.25); }
@@ -692,11 +787,12 @@ const STYLES = `
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-top: 16px; }
   .card { background: var(--card-background-color, #fff); border-radius: 16px; padding: 16px 18px; box-shadow: 0 2px 10px rgba(0,0,0,.08); }
   .card.wide { grid-column: 1 / -1; margin-top: 16px; }
+  .card.test-on { outline: 2px solid #0f7b6c; }
   h3 { margin: 0 0 6px; font-size: 16px; }
   h4 { margin: 12px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .5px; opacity: .6; }
   .badge { background: ${DAC_AMBER}; color: #111; border-radius: 999px; font-size: 11px; padding: 2px 9px; margin-left: 6px; vertical-align: middle; }
   .muted { color: var(--secondary-text-color, #6b7280); font-size: 13px; margin: 0 0 10px; }
-  .hint { color: var(--secondary-text-color, #6b7280); font-size: 12px; margin: 10px 0 0; line-height: 1.5; }
+  .hint { color: var(--secondary-text-color, #6b7280); font-size: 12px; margin: 6px 0 0; line-height: 1.5; }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .row.end { justify-content: flex-end; margin-top: 14px; }
   .dirty { font-size: 12px; color: var(--secondary-text-color, #6b7280); margin-right: auto; }
@@ -708,22 +804,24 @@ const STYLES = `
   .btn.tiny { padding: 3px 9px; font-size: 12px; }
   .btn.stop { background: #fff; color: #b12704; font-size: 16px; padding: 13px 22px; margin-top: 14px; width: 100%; }
   .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
-  .chips.small { margin-top: 6px; }
-  .chips.small .chip { font-size: 11px; padding: 3px 9px; }
   .chip { background: var(--secondary-background-color, #eef1f5); border: 1px solid var(--divider-color, rgba(0,0,0,.1)); border-radius: 999px; padding: 6px 12px; cursor: pointer; font-size: 13px; color: inherit; }
+  .suggestions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; min-height: 8px; }
+  .chip.suggest { text-align: left; }
+  .chip.suggest em { display: block; font-style: normal; opacity: .55; font-size: 11px; }
   .seg { display: flex; gap: 6px; background: var(--secondary-background-color, #eef1f5); border-radius: 12px; padding: 4px; }
   .segbtn { flex: 1; border: none; background: transparent; border-radius: 9px; padding: 9px; cursor: pointer; font-weight: 600; color: inherit; }
   .segbtn.on { background: ${DAC_AMBER}; color: #111; }
   .kv { display: flex; justify-content: space-between; padding: 5px 0; font-size: 14px; border-bottom: 1px solid var(--divider-color, rgba(0,0,0,.07)); }
-  .fieldsets { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 8px; }
+  .fieldsets { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-top: 8px; }
   .fieldset { border: 1px solid var(--divider-color, rgba(0,0,0,.1)); border-radius: 14px; padding: 10px 14px 14px; margin: 0; }
   .fieldset legend { font-size: 12px; text-transform: uppercase; letter-spacing: .6px; opacity: .65; padding: 0 6px; }
-  .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+  .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
   .field { display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
   .field > span { color: var(--secondary-text-color, #6b7280); }
   .inp, .field input[type=text], .field input[type=number], .field input[type=time], .field select { background: var(--secondary-background-color, #eef1f5); border: 1px solid var(--divider-color, rgba(0,0,0,.12)); border-radius: 10px; padding: 9px 11px; font-size: 14px; color: inherit; width: 100%; box-sizing: border-box; }
   .inp.time { width: auto; font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .inp.small { width: 90px; }
+  .entity-field .suggest-input { border-style: dashed; }
   .switch { display: flex; align-items: center; gap: 10px; font-size: 14px; padding: 6px 0; grid-column: 1 / -1; }
   .switch input { width: 20px; height: 20px; }
   .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
@@ -752,6 +850,9 @@ const STYLES = `
 
 if (!customElements.get("dac-panel")) {
   customElements.define("dac-panel", DacPanel);
+}
+if (!customElements.get("dac-settings-panel")) {
+  customElements.define("dac-settings-panel", DacSettingsPanel);
 }
 
 if (window.console && window.console.info) {

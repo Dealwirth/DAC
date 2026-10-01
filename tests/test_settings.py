@@ -6,13 +6,10 @@ from datetime import time
 from homeassistant.core import HomeAssistant
 
 from custom_components.dac.const import (
-    CONF_ALARM_VOLUME,
-    CONF_ALEXA_COMMAND_TYPE,
     CONF_ALEXA_ENABLED,
     CONF_DEFAULT_ALARM_TIME,
     CONF_OFFSET,
     CONF_VACATION_KEYWORDS,
-    CONF_WAKE_TEXT,
     DEFAULT_VACATION_KEYWORDS,
 )
 from custom_components.dac.settings import (
@@ -34,42 +31,36 @@ def test_coerce_options_normalizes_everything() -> None:
         {
             CONF_DEFAULT_ALARM_TIME: time(7, 15),
             CONF_OFFSET: "45",
-            CONF_ALARM_VOLUME: "1.7",
             CONF_ALEXA_ENABLED: "ja",
             "alarm_lights": "light.a, light.b",
-            "media_players": ["media_player.echo"],
             CONF_VACATION_KEYWORDS: "urlaub, brückentag",
-            CONF_WAKE_TEXT: "Aufstehen!",
         },
         default_options(),
     )
     assert result[CONF_DEFAULT_ALARM_TIME] == "07:15:00"
     assert result[CONF_OFFSET] == 45
-    assert result[CONF_ALARM_VOLUME] == 1.0  # clamped
     assert result[CONF_ALEXA_ENABLED] is True
     assert result["alarm_lights"] == ["light.a", "light.b"]
-    assert result["media_players"] == ["media_player.echo"]
     assert result[CONF_VACATION_KEYWORDS] == "urlaub, brückentag"
-    assert result[CONF_WAKE_TEXT] == "Aufstehen!"
-
-
-def test_coerce_options_normalizes_command_type() -> None:
-    """The Alexa command type is restricted to the known values."""
-    assert coerce_options({CONF_ALEXA_COMMAND_TYPE: "tts"}, default_options())[
-        CONF_ALEXA_COMMAND_TYPE
-    ] == "tts"
-    assert coerce_options({CONF_ALEXA_COMMAND_TYPE: "bogus"}, default_options())[
-        CONF_ALEXA_COMMAND_TYPE
-    ] == "custom"
 
 
 def test_coerce_options_ignores_unknown_keys_and_keeps_base() -> None:
     base = default_options()
     base[CONF_OFFSET] = 20
-    result = coerce_options({"junk": 1, CONF_WAKE_TEXT: None}, base)
+    result = coerce_options({"junk": 1}, base)
     assert "junk" not in result
     assert result[CONF_OFFSET] == 20
-    assert result[CONF_WAKE_TEXT] == ""
+
+
+def test_coerce_options_removed_keys_are_ignored() -> None:
+    """Options that no longer exist must not leak into the config entry."""
+    result = coerce_options(
+        {"media_players": ["media_player.x"], "wake_text": "Hallo", "alarm_volume": 0.9},
+        default_options(),
+    )
+    assert "media_players" not in result
+    assert "wake_text" not in result
+    assert "alarm_volume" not in result
 
 
 def test_vacation_keywords_fallback_and_parsing() -> None:

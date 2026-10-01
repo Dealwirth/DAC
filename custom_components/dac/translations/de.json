@@ -21,20 +21,16 @@
           "reminder_text": "Erinnerungstext ({alarm_time} wird ersetzt)",
           "notifier": "Ziel-Benachrichtigungsdienst (notify.*)",
           "alarm_lights": "Weck-Lichter (optional)",
-          "media_players": "Weck-Media-Player (optional)",
           "vacation_calendars": "Externe Urlaubs-/Feiertagskalender (optional)",
-          "alarm_volume": "Weck-Lautstärke (0.0–1.0)",
           "alexa_enabled": "Alexa-Geräte-Wecker (Echo) zusätzlich stellen",
           "alexa_media_player": "Echo media_player (alexa_media) – leer = Weck-Player",
           "alexa_text_helper": "Helfer: gesetzter Alexa-Wecker (input_text)",
           "alexa_enabled_boolean": "Helfer: Wecker aktiv (input_boolean)",
           "pre_alarm_minutes": "Vorab-Wecker auf dem Echo: Minuten vor der Weckzeit",
           "vacation_keywords": "Urlaubs-Schlagwörter (Komma-getrennt)",
-          "wake_text": "Weck-Ansage (TTS-Text)",
-          "alexa_command_type": "Alexa-Befehlstyp (custom = Textbefehl, tts = gesprochen)",
-          "loop_interval_minutes": "Weck-Wiederholung: alle N Minuten erneut wecken (1-60)",
-          "test_mode_minutes": "Testwecker: klingelt nach N Minuten",
-          "stop_word": "Stopp-Wort (Name des Echo-Weckers für die Alexa-Stopp-Routine)"
+          "loop_interval_minutes": "Weck-Wiederholung: alle N Minuten wiederholen, bis gestoppt wird (1-60)",
+          "test_mode_minutes": "Testmodus: Testwecker klingelt nach N Minuten",
+          "stop_word": "Stopp-Wort: Name des Echo-Weckers, der DAC per Alexa-Routine stoppt"
         }
       }
     }
@@ -73,7 +69,7 @@
     },
     "stop_alarm": {
       "name": "Wecker stoppen",
-      "description": "Stoppt die laufende Weck-Schleife und den Echo-Wecker. Genau dieser Dienst wird auch von der Alexa-Routine „DAC Stopp“ aufgerufen."
+      "description": "Stoppt die laufende Weck-Schleife (Licht) und löscht den Echo-Wecker. Genau dieser Dienst wird auch von der Alexa-Routine „DAC Stopp“ aufgerufen."
     },
     "dismiss_for_today": {
       "name": "Für heute deaktivieren",
@@ -89,7 +85,7 @@
     },
     "start_test_alarm": {
       "name": "Testwecker starten",
-      "description": "Klingelt einmalig nach N Minuten (Standard aus den Einstellungen) mit der kompletten Weck-Kette. Stoppen über stop_alarm, den Panel-Button oder das Alexa-Stopp-Wort."
+      "description": "Klingelt einmalig nach N Minuten (Standard aus den Einstellungen) mit derselben Kette wie der echte Wecker (Licht, Echo-Vorab-Wecker). Stoppen über stop_alarm, den Panel-Button oder das Alexa-Stopp-Wort."
     },
     "cancel_test_alarm": {
       "name": "Testwecker abbrechen",
