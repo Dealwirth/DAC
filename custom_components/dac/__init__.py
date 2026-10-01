@@ -21,7 +21,7 @@ from .const import (
     SERVICE_STOP_ALARM,
 )
 from .coordinator import DacCoordinator
-from .dac_card import async_setup_lovelace
+from .frontend import async_setup_frontend
 from .http_api import DacApiView
 from .store import DacStore
 
@@ -58,14 +58,13 @@ _SERVICE_MAP = {
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Register the HTTP API and the custom dashboard (once).
+    """Register the HTTP API and the sidebar panel (once).
 
-    The static files (Lovelace card) and the sidebar dashboard are registered
-    via Lovelace, which loads asynchronously – hence the deferred task.
+    ``http``, ``frontend`` and ``panel_custom`` are declared as manifest
+    dependencies, so they are ready by the time DAC sets up.
     """
     hass.http.register_view(DacApiView())
-    # Lovelace card + dedicated dashboard (deferred, lovelace loads later).
-    hass.async_create_task(async_setup_lovelace(hass))
+    await async_setup_frontend(hass)
     return True
 
 

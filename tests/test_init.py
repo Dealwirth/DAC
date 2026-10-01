@@ -16,7 +16,7 @@ async def test_setup_creates_entities_and_services(
     hass: HomeAssistant, config_entry: MockConfigEntry, options: dict
 ) -> None:
     """A config entry sets up the coordinator, entities and services."""
-    with patch("custom_components.dac.async_setup_lovelace", new=AsyncMock()):
+    with patch("custom_components.dac.async_setup_frontend", new=AsyncMock()):
         await hass.config_entries.async_setup(config_entry.entry_id)
         await hass.async_block_till_done()
 
@@ -48,7 +48,7 @@ async def test_set_work_time_service_updates_sensor(
     hass: HomeAssistant, config_entry: MockConfigEntry, options: dict
 ) -> None:
     """Calling dac.set_work_time schedules the alarm on the sensor."""
-    with patch("custom_components.dac.async_setup_lovelace", new=AsyncMock()):
+    with patch("custom_components.dac.async_setup_frontend", new=AsyncMock()):
         await hass.config_entries.async_setup(config_entry.entry_id)
         await hass.async_block_till_done()
 
@@ -70,7 +70,7 @@ async def test_stop_and_dismiss_services(
     hass: HomeAssistant, config_entry: MockConfigEntry, options: dict
 ) -> None:
     """stop_alarm and dismiss_for_today run without errors."""
-    with patch("custom_components.dac.async_setup_lovelace", new=AsyncMock()):
+    with patch("custom_components.dac.async_setup_frontend", new=AsyncMock()):
         await hass.config_entries.async_setup(config_entry.entry_id)
         await hass.async_block_till_done()
 
@@ -94,7 +94,7 @@ async def test_second_entry_keeps_services_on_unload(
     first.add_to_hass(hass)
     second.add_to_hass(hass)
 
-    with patch("custom_components.dac.async_setup_lovelace", new=AsyncMock()):
+    with patch("custom_components.dac.async_setup_frontend", new=AsyncMock()):
         # Setting up the config-entry manager loads all registered entries.
         await hass.config_entries.async_setup(first.entry_id)
         await hass.async_block_till_done()
@@ -121,7 +121,7 @@ async def test_service_requires_entry_id_with_multiple_entries(
     first.add_to_hass(hass)
     second.add_to_hass(hass)
 
-    with patch("custom_components.dac.async_setup_lovelace", new=AsyncMock()):
+    with patch("custom_components.dac.async_setup_frontend", new=AsyncMock()):
         await hass.config_entries.async_setup(first.entry_id)
         await hass.async_block_till_done()
 

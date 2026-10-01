@@ -20,30 +20,15 @@ from homeassistant.util import dt as dt_util
 
 from custom_components.dac.const import (
     CONF_ALARM_LIGHTS,
-    CONF_ALARM_VOLUME,
     CONF_ALEXA_ENABLED,
-    CONF_ALEXA_ENABLED_BOOLEAN,
     CONF_ALEXA_MEDIA_PLAYER,
-    CONF_ALEXA_TEXT_HELPER,
-    CONF_DEFAULT_ALARM_TIME,
     CONF_MEDIA_PLAYERS,
     CONF_NOTIFIER,
-    CONF_OFFSET,
-    CONF_PRE_ALARM_MINUTES,
-    CONF_REMINDER_TEXT,
-    CONF_REMINDER_TIME,
     CONF_VACATION_CALENDARS,
-    DEFAULT_ALARM_TIME,
-    DEFAULT_ALARM_VOLUME,
-    DEFAULT_ALEXA_ENABLED_BOOLEAN,
-    DEFAULT_ALEXA_TEXT_HELPER,
-    DEFAULT_OFFSET_MINUTES,
-    DEFAULT_PRE_ALARM_MINUTES,
-    DEFAULT_REMINDER_TEXT,
-    DEFAULT_REMINDER_TIME,
     DOMAIN,
 )
 from custom_components.dac.coordinator import DacCoordinator
+from custom_components.dac.settings import default_options
 from custom_components.dac.store import DacStore
 
 
@@ -76,20 +61,13 @@ def berlin_tz(hass: HomeAssistant):
 def options() -> dict[str, Any]:
     """Standard options as they would come from a config entry."""
     return {
-        CONF_DEFAULT_ALARM_TIME: DEFAULT_ALARM_TIME,
-        CONF_OFFSET: DEFAULT_OFFSET_MINUTES,
-        CONF_REMINDER_TIME: DEFAULT_REMINDER_TIME,
-        CONF_REMINDER_TEXT: DEFAULT_REMINDER_TEXT,
+        **default_options(),
         CONF_NOTIFIER: "notify.test",
         CONF_ALARM_LIGHTS: ["light.alarm"],
         CONF_MEDIA_PLAYERS: ["media_player.alarm"],
         CONF_VACATION_CALENDARS: ["calendar.vac"],
-        CONF_ALARM_VOLUME: DEFAULT_ALARM_VOLUME,
         CONF_ALEXA_ENABLED: False,
         CONF_ALEXA_MEDIA_PLAYER: "media_player.echo",
-        CONF_ALEXA_TEXT_HELPER: DEFAULT_ALEXA_TEXT_HELPER,
-        CONF_ALEXA_ENABLED_BOOLEAN: DEFAULT_ALEXA_ENABLED_BOOLEAN,
-        CONF_PRE_ALARM_MINUTES: DEFAULT_PRE_ALARM_MINUTES,
     }
 
 

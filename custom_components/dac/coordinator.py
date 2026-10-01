@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from datetime import date, datetime, time, timedelta
-from typing import Any, Final
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, callback
@@ -36,10 +36,12 @@ from .const import (
     CONF_REMINDER_TEXT,
     CONF_REMINDER_TIME,
     CONF_VACATION_CALENDARS,
+    CONF_WAKE_TEXT,
     DEFAULT_ALARM_VOLUME,
     DEFAULT_LOOP_INTERVAL,
     DEFAULT_REMINDER_TEXT,
     DEFAULT_VACATION_SCAN_TIME,
+    DEFAULT_WAKE_TEXT,
     DOMAIN,
     MODE_DISMISSED,
     MODE_STANDARD,
@@ -57,11 +59,10 @@ from .logic import (
     event_marks_vacation,
     parse_time_str,
 )
+from .settings import vacation_keywords
 from .store import DacStore
 
 _LOGGER = logging.getLogger(__name__)
-
-WAKE_TEXT: Final[str] = "Guten Morgen! Es ist Zeit aufzustehen."
 
 
 class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -83,7 +84,9 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self.entry_id = config_entry.entry_id
         self._store = store
-        self._options = dict(config_entry.options)
+        # Options may live in entry.data (initial setup) and/or entry.options
+        # (panel/options flow) – merge so both paths behave identically.
+        self._options = {**config_entry.data, **config_entry.options}
         self._unsub: list[Callable[[], None]] = []
 
         # runtime state (use set_state so listeners are notified)
@@ -408,7 +411,8 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 events: list[dict[str, Any]] = []
                 for response in result.values():
                     events.extend(response.get("events") or [])
-                vacation = any(event_marks_vacation(ev, today) for ev in events)
+                keywords = vacation_keywords(self._options)
+                vacation = any(event_marks_vacation(ev, today, keywords) for ev in events)
             except (HomeAssistantError, ValueError) as err:
                 _LOGGER.warning("DAC vacation check failed: %s", err)
         if self._vacation_override_day == today:
@@ -464,6 +468,7 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._is_vacation:
             self._set_state(STATE_VACATION)
             self._alarm_target = None
+            self._sync_gate(False)
             return
 
         now = dt_util.now()
@@ -511,6 +516,7 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._alarm_day in self._dismissed_days:
             self._set_state(STATE_DISMISSED)
             self._alarm_target = None
+            self._sync_gate(False)
             return
 
         self._alarm_target = datetime.combine(
@@ -524,6 +530,7 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         if self._state not in (STATE_RINGING, STATE_STOPPED, STATE_DISMISSED):
             self._set_state(STATE_SCHEDULED)
+        self._sync_gate(True)
         self._ringing_jobs.append(
             async_track_point_in_time(self.hass, self._alarm_fired, self._alarm_target)
         )
@@ -543,6 +550,9 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         self._set_state(STATE_RINGING)
         self.async_update_listeners()
+        # Mirror the YAML "gate on while ringing": DAC owns the gate so the
+        # Echo pre-alarm keeps being placed even across restarts.
+        await self.alexa.async_set_gate(True)
         await self._async_fire_once()
         if self._state == STATE_RINGING:
             self._loop_unsub = async_track_time_interval(
@@ -558,6 +568,7 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """One loop iteration: lights on + media players announce."""
         lights = list(self._options.get(CONF_ALARM_LIGHTS) or [])
         players = list(self._options.get(CONF_MEDIA_PLAYERS) or [])
+        wake_text = str(self._options.get(CONF_WAKE_TEXT) or DEFAULT_WAKE_TEXT)
         for light in lights:
             state = self.hass.states.get(light)
             if state is None or state.state == "off":
@@ -581,7 +592,7 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     {
                         "entity_id": player,
                         "media_content_type": "tts",
-                        "media_content_id": WAKE_TEXT,
+                        "media_content_id": wake_text,
                     },
                     blocking=True,
                 )
@@ -599,6 +610,16 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         except (TypeError, ValueError):
             return DEFAULT_ALARM_VOLUME
+
+    def _sync_gate(self, on: bool) -> None:
+        """Mirror the alarm state onto the wecker_aktiv gate (YAML Tag 1/Tag 4).
+
+        Only runs when the Alexa bridge is active; a failure here must never
+        affect the alarm itself, so it is fire-and-forget.
+        """
+        if not self.alexa.enabled:
+            return
+        self.hass.async_create_task(self.alexa.async_set_gate(on))
 
     async def _async_stop_loop(self, set_state: str | None = None) -> None:
         """Stop media players and the repeating loop."""

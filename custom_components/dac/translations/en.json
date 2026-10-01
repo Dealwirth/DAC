@@ -3,27 +3,8 @@
     "step": {
       "user": {
         "title": "DAC – Dynamic Alarm Clock",
-        "description": "Calculates your wake-up time automatically from your work start (work start minus offset) – including vacation/holiday logic and a daily reminder.",
-        "data": {
-          "default_alarm_time": "Default alarm time (fallback when no work time is set)",
-          "offset_minutes": "Offset: minutes to wake up BEFORE work starts",
-          "reminder_time": "Daily reminder at (checks whether a work time was set)",
-          "reminder_text": "Reminder text ({alarm_time} is replaced)",
-          "notifier": "Target notification service (notify.*)",
-          "alarm_lights": "Alarm lights (optional)",
-          "media_players": "Alarm media players (optional)",
-          "vacation_calendars": "External vacation/holiday calendars (optional)",
-          "alarm_volume": "Alarm volume (0.0–1.0)",
-          "alexa_enabled": "Also set an Alexa device alarm (Echo)",
-          "alexa_media_player": "Echo media_player (alexa_media) – empty = alarm player",
-          "alexa_text_helper": "Helper: stored Alexa alarm (input_text)",
-          "alexa_enabled_boolean": "Helper: alarm active (input_boolean)",
-          "pre_alarm_minutes": "Pre-alarm on the Echo: minutes before the wake-up time"
-        }
+        "description": "No input is required. After adding the integration you will find every setting in the sidebar panel “DAC”."
       }
-    },
-    "error": {
-      "invalid_input": "Invalid input, please check."
     },
     "abort": {
       "already_configured": "DAC is already configured."
@@ -47,12 +28,12 @@
           "alexa_media_player": "Echo media_player (alexa_media) – empty = alarm player",
           "alexa_text_helper": "Helper: stored Alexa alarm (input_text)",
           "alexa_enabled_boolean": "Helper: alarm active (input_boolean)",
-          "pre_alarm_minutes": "Pre-alarm on the Echo: minutes before the wake-up time"
+          "pre_alarm_minutes": "Pre-alarm on the Echo: minutes before the wake-up time",
+          "vacation_keywords": "Vacation keywords (comma separated)",
+          "wake_text": "Wake announcement text",
+          "alexa_command_type": "Alexa command type (custom = text command, tts = spoken)"
         }
       }
-    },
-    "error": {
-      "invalid_input": "Invalid input, please check."
     }
   },
   "entity": {

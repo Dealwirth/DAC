@@ -136,6 +136,57 @@ async def test_stop_alarm_while_not_ringing_is_harmless(
 
 
 # ---------------------------------------------------------------------------
+# tests: Alexa gate (YAML Tag 1 / Tag 4 parity)
+# ---------------------------------------------------------------------------
+
+
+async def _gate_calls(hass: HomeAssistant, coordinator: DacCoordinator) -> list[str]:
+    """Capture input_boolean service calls made while an action runs."""
+    from unittest.mock import patch
+
+    calls: list[str] = []
+    registry_cls = type(hass.services)
+    real_call = registry_cls.async_call
+
+    async def spy(self, domain, service, service_data=None, **kwargs):
+        if domain == "input_boolean":
+            calls.append(service)
+            return None
+        return await real_call(self, domain, service, service_data, **kwargs)
+
+    with patch.object(registry_cls, "async_call", autospec=True, side_effect=spy):
+        await coordinator.async_set_work_time(_fake_call({"time": "15:00"}))
+        await hass.async_block_till_done()
+        await _advance_to_alarm(hass, coordinator)
+        await hass.async_block_till_done()
+        await coordinator.async_stop_alarm(_fake_call({}))
+        await hass.async_block_till_done()
+    return calls
+
+
+@freeze_time("2026-09-06 11:59:59")
+async def test_gate_turns_on_when_scheduled_and_off_when_stopped(
+    hass: HomeAssistant, coordinator: DacCoordinator
+):
+    """Scheduling turns wecker_aktiv on, stopping the ringing alarm off."""
+    from custom_components.dac.const import CONF_ALEXA_ENABLED
+
+    coordinator._options[CONF_ALEXA_ENABLED] = True
+    calls = await _gate_calls(hass, coordinator)
+    assert "turn_on" in calls
+    assert "turn_off" in calls
+
+
+@freeze_time("2026-09-06 11:59:59")
+async def test_gate_untouched_without_alexa(
+    hass: HomeAssistant, coordinator: DacCoordinator
+):
+    """Without the Alexa bridge DAC never touches the user's helper."""
+    calls = await _gate_calls(hass, coordinator)
+    assert calls == []
+
+
+# ---------------------------------------------------------------------------
 # tests: dismissal
 # ---------------------------------------------------------------------------
 
