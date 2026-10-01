@@ -22,7 +22,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_platform as ep
 from homeassistant.util import dt as dt_util
 
-from .const import ALEXA_ROUTINE_NAME, DOMAIN
+from .const import ALEXA_ROUTINE_NAME, DOMAIN, ENTITY_SEARCH_EXCLUDE_DOMAINS
 from .coordinator import DacCoordinator
 from .logic import event_marks_vacation
 from .settings import EDITABLE_KEYS, coerce_options, default_options, vacation_keywords
@@ -281,29 +281,22 @@ async def _entry_payload(hass: HomeAssistant, coordinator: DacCoordinator) -> di
     }
 
 
-def _entity_suggestions(hass: HomeAssistant) -> dict[str, list[dict[str, str]]]:
-    """Existing entities the panel can suggest for the entity pickers.
+def _entity_suggestions(hass: HomeAssistant) -> list[dict[str, str]]:
+    """Every entity the panel may suggest, as one flat searchable list.
 
-    Grouped by the option they belong to so the frontend can render a
-    datalist per field without any extra round trip.
+    The panel renders a search box plus suggestions per field and filters this
+    list locally by domain and by the typed text, so a single list is enough.
+    Only noisy internal domains are skipped.
     """
-    wanted = {
-        "lights": ("light",),
-        "media_players": ("media_player",),
-        "calendars": ("calendar",),
-        "notifiers": ("notify",),
-        "input_text": ("input_text",),
-        "input_boolean": ("input_boolean",),
-    }
-    suggestions: dict[str, list[dict[str, str]]] = {}
-    for group, domains in wanted.items():
-        items: list[dict[str, str]] = []
-        for domain in domains:
-            for state in hass.states.async_all(domain):
-                name = state.attributes.get("friendly_name") or state.entity_id
-                items.append({"id": state.entity_id, "name": str(name)})
-        suggestions[group] = sorted(items, key=lambda item: item["id"])
-    return suggestions
+    items: list[dict[str, str]] = []
+    for state in hass.states.async_all():
+        entity_id = state.entity_id
+        domain = entity_id.split(".", 1)[0]
+        if domain in ENTITY_SEARCH_EXCLUDE_DOMAINS:
+            continue
+        name = state.attributes.get("friendly_name") or entity_id
+        items.append({"id": entity_id, "name": str(name), "domain": domain})
+    return sorted(items, key=lambda item: (item["domain"], item["id"]))
 
 
 def _settings_payload(options: dict[str, Any]) -> dict[str, Any]:
@@ -460,9 +453,8 @@ def _day_summary(
     for event in events:
         first = _parse_date(event.get("start"))
         last = _parse_date(event.get("end")) or first
-        if first is not None and last is not None and first <= day <= last:
-            if event.get("summary"):
-                return str(event["summary"])
+        if first is not None and last is not None and first <= day <= last and event.get("summary"):
+            return str(event["summary"])
     return "Urlaub"
 
 

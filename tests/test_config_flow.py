@@ -65,11 +65,8 @@ async def test_options_flow_updates_values(
             "reminder_text": "Neuer Text",
             "notifier": "notify.mobile_app_test",
             "alarm_lights": [],
-            "media_players": [],
             "vacation_calendars": [],
-            "alarm_volume": 0.8,
             CONF_VACATION_KEYWORDS: "urlaub, feiertag",
-            "wake_text": "Aufstehen!",
         },
     )
     await hass.async_block_till_done()

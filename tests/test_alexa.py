@@ -175,35 +175,29 @@ async def test_pre_alarm_ignores_gate(
     assert "Uhr morgens" in texts[0] or "Uhr abends" in texts[0]
 
 
-async def test_command_type_custom_by_default(coordinator) -> None:
-    """The Alexa command is sent as a plain text command by default."""
-    assert coordinator.alexa.command_type == "custom"
-
-
-async def test_command_type_tts_option(coordinator) -> None:
-    """The command type is configurable and falls back to custom."""
-    from custom_components.dac.const import CONF_ALEXA_COMMAND_TYPE
-
-    coordinator._options[CONF_ALEXA_COMMAND_TYPE] = "tts"
-    assert coordinator.alexa.command_type == "tts"
-    coordinator._options[CONF_ALEXA_COMMAND_TYPE] = "nonsense"
-    assert coordinator.alexa.command_type == "custom"
-
-
-async def test_send_text_uses_command_type(
+async def test_command_is_always_custom_text(
     hass: HomeAssistant, coordinator, service_calls: list[tuple[str, str, dict]]
 ) -> None:
-    """play_media carries the configured media_content_type."""
-    from custom_components.dac.const import CONF_ALEXA_COMMAND_TYPE
-
+    """DAC only ever sends a plain text command – no TTS/announcements."""
     coordinator._options[CONF_ALEXA_ENABLED] = True
-    coordinator._options[CONF_ALEXA_COMMAND_TYPE] = "custom"
     await coordinator.alexa.async_send_text("test")
     assert service_calls[-1][2]["media_content_type"] == "custom"
+    assert service_calls[-1][2]["media_content_id"] == "test"
 
-    coordinator._options[CONF_ALEXA_COMMAND_TYPE] = "tts"
-    await coordinator.alexa.async_send_text("test")
-    assert service_calls[-1][2]["media_content_type"] == "tts"
+
+async def test_alarm_name_carries_stop_word(
+    hass: HomeAssistant, coordinator, service_calls: list[tuple[str, str, dict]]
+) -> None:
+    """The Echo alarm is named with the stop word so an Alexa routine can stop DAC."""
+    from custom_components.dac.const import CONF_STOP_WORD
+
+    coordinator._options[CONF_ALEXA_ENABLED] = True
+    coordinator._options[CONF_STOP_WORD] = "Wecker aus"
+    coordinator._alarm_time = time(6, 0)
+
+    await coordinator.alexa.async_pre_alarm()
+    texts = [data.get("media_content_id", "") for d, s, data in service_calls if s == "play_media"]
+    assert texts and "namens Wecker aus" in texts[0]
 
 
 async def test_set_gate_turns_helper_on_and_off(

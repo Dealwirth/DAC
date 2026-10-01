@@ -1,15 +1,18 @@
-"""Optional device alarms on Amazon Echo (via the alexa_media integration).
+"""Device alarm on Amazon Echo (via the alexa_media integration).
 
-DAC can additionally set a *real* alarm on the Echo device itself:
+DAC places a *real* alarm on the Echo device, exactly like the YAML
+automation: a text command ("stelle einen Wecker auf 05:00 Uhr morgens") is
+sent with ``media_player.play_media`` and ``media_content_type: custom``.
+The AM/PM suffix stops Alexa from asking back for the time of day.
 
-* The command is sent as text (``media_player.play_media`` with
-  ``media_content_type: tts``) and always contains "morgens"/"abends" so
-  Alexa never asks back for the time of day.
 * Only the alarm DAC itself has set (stored in an ``input_text`` helper) is
   ever deleted – manually configured Echo alarms are left untouched.
-* While the wake loop is ringing, a fresh 2-minute pre-alarm is placed on
-  the device every loop iteration (as long as the ``input_boolean`` gate is
-  on), so the Echo also rings if Home Assistant is unavailable.
+* While the wake loop is ringing, a fresh short pre-alarm is placed on the
+  device on every loop iteration, so the Echo also rings if Home Assistant
+  is unavailable.
+* Every alarm DAC places carries the configurable stop word as its name. An
+  Alexa routine triggered by "an alarm with this name rings" can call
+  ``dac.stop_alarm`` – stopping by voice needs no custom skill.
 """
 from __future__ import annotations
 
@@ -22,17 +25,13 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    ALEXA_COMMAND_TYPE_CUSTOM,
-    ALEXA_COMMAND_TYPE_TTS,
     ALEXA_STOP_ALARM_TEXT,
     ATTR_DAY,
     ATTR_TIME,
-    CONF_ALEXA_COMMAND_TYPE,
     CONF_ALEXA_ENABLED,
     CONF_ALEXA_ENABLED_BOOLEAN,
     CONF_ALEXA_MEDIA_PLAYER,
     CONF_ALEXA_TEXT_HELPER,
-    CONF_MEDIA_PLAYERS,
     CONF_PRE_ALARM_MINUTES,
     CONF_STOP_WORD,
     DEFAULT_ALEXA_ENABLED_BOOLEAN,
@@ -42,7 +41,6 @@ from .const import (
 )
 from .logic import (
     alexa_clear_text,
-    alexa_set_text,
     format_alexa_time,
     parse_time_str,
     split_am_pm,
@@ -76,12 +74,9 @@ class AlexaBridge:
 
     @property
     def player(self) -> str | None:
-        """The Echo media_player entity (falls back to the alarm players)."""
+        """The Echo media_player entity."""
         player = self._options.get(CONF_ALEXA_MEDIA_PLAYER)
-        if player:
-            return str(player)
-        players = self._options.get(CONF_MEDIA_PLAYERS) or []
-        return str(players[0]) if players else None
+        return str(player) if player else None
 
     @property
     def helper(self) -> str:
@@ -92,12 +87,6 @@ class AlexaBridge:
         return str(self._options.get(CONF_ALEXA_ENABLED_BOOLEAN) or DEFAULT_ALEXA_ENABLED_BOOLEAN)
 
     @property
-    def command_type(self) -> str:
-        """How the text command is sent: 'custom' (text command) or 'tts'."""
-        value = self._options.get(CONF_ALEXA_COMMAND_TYPE)
-        return value if value in (ALEXA_COMMAND_TYPE_CUSTOM, ALEXA_COMMAND_TYPE_TTS) else ALEXA_COMMAND_TYPE_CUSTOM
-
-    @property
     def pre_alarm_minutes(self) -> int:
         try:
             return max(0, int(self._options.get(CONF_PRE_ALARM_MINUTES, DEFAULT_PRE_ALARM_MINUTES)))
@@ -106,13 +95,11 @@ class AlexaBridge:
 
     @property
     def stop_word(self) -> str:
-        """Label used for the Echo alarms so an Alexa routine can stop DAC.
+        """Name given to the Echo alarms so an Alexa routine can stop DAC.
 
-        DAC names every alarm it places on the device with this label. In the
-        Alexa app the user creates one routine ("DAC Stopp") whose trigger is
-        "when an alarm with this name rings" and whose action calls the HA
-        script/service ``dac.stop_alarm`` – no custom skill and no cloud hook
-        required, and it works even if Home Assistant is briefly offline.
+        In the Alexa app the user creates one routine ("DAC Stopp") whose
+        trigger is "when an alarm with this name rings" and whose action calls
+        ``dac.stop_alarm`` – no custom skill and no cloud hook required.
         """
         value = str(self._options.get(CONF_STOP_WORD) or DEFAULT_STOP_WORD).strip()
         return value or DEFAULT_STOP_WORD
@@ -174,7 +161,7 @@ class AlexaBridge:
         await self._async_write_helper(desired or "")
 
     async def async_set_alarm(self, call: ServiceCall | Any) -> None:
-        """Handle dac.set_alexa_alarm – optional explicit time/day override.
+        """Handle dac.set_alexa_alarm – optional explicit time override.
 
         Without ``time`` the currently computed alarm is (re-)placed on the
         device. With an explicit ``time`` the given alarm is placed directly
@@ -216,18 +203,14 @@ class AlexaBridge:
 
     # ------------------------------------------------------------- pre-alarm
     def _set_command(self, value: Any) -> str:
-        """The 'set an alarm' command, labelled with the stop word when set.
+        """The 'set an alarm' command, named with the stop word.
 
-        The label is what an Alexa routine can listen for ("when an alarm
-        named 'Wecker aus' rings -> call dac.stop_alarm"), so stopping the
-        alarm by voice needs no custom skill.
+        The name is what an Alexa routine listens for ("an alarm named
+        'Wecker aus' rings -> call dac.stop_alarm"), so stopping by voice needs
+        no custom skill.
         """
-        base = alexa_set_text(value)
-        label = self.stop_word
-        if not label:
-            return base
         return ALEXA_STOP_ALARM_TEXT.format(
-            time=format_alexa_time(value), tod=split_am_pm(value), label=label
+            time=format_alexa_time(value), tod=split_am_pm(value), label=self.stop_word
         )
 
     async def async_pre_alarm(self) -> None:
@@ -245,8 +228,7 @@ class AlexaBridge:
             # with an identical command.
             return
         self._last_pre_alarm_time = time_text
-        text = self._set_command(parse_time_str(time_text))
-        await self.async_send_text(text)
+        await self.async_send_text(self._set_command(parse_time_str(time_text)))
 
     def pre_alarm_time_text(self) -> str:
         """The time string used for the pre-alarm command."""
@@ -259,24 +241,9 @@ class AlexaBridge:
                 return format_alexa_time(shifted.time())
         return format_alexa_time(alarm_time)
 
-    def pre_alarm_tod(self) -> str:
-        """'morgens'/'abends' for the pre-alarm time."""
-        alarm_time = self.coordinator._alarm_time or dt_util.now().time()
-        pre = self.pre_alarm_minutes
-        if pre:
-            now = dt_util.now()
-            shifted = now.replace(second=0, microsecond=0) + timedelta(minutes=pre)
-            if shifted.date() == now.date():
-                return split_am_pm(shifted.time())
-        return split_am_pm(alarm_time)
-
     # ------------------------------------------------------------------ io
     async def async_send_text(self, text: str) -> None:
-        """Send a text command to the Echo device.
-
-        ``custom`` sends it as a plain Alexa text command (the classic YAML
-        way), ``tts`` lets the device speak it. Both carry the alarm phrasing.
-        """
+        """Send a plain Alexa text command to the Echo device."""
         player = self.player
         if not player:
             return
@@ -286,7 +253,7 @@ class AlexaBridge:
                 "play_media",
                 {
                     "entity_id": player,
-                    "media_content_type": self.command_type,
+                    "media_content_type": "custom",
                     "media_content_id": text,
                 },
                 blocking=True,

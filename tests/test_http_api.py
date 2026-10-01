@@ -213,18 +213,28 @@ def test_range_days_swaps_and_expands() -> None:
 
 
 async def test_get_exposes_entity_suggestions(hass: HomeAssistant, loaded_entry) -> None:
-    """GET /api/dac offers the existing entities for the panel pickers."""
+    """GET /api/dac offers one flat, searchable list of entities for the pickers."""
     hass.states.async_set("light.bedroom", "off", {"friendly_name": "Schlafzimmer"})
     hass.states.async_set("media_player.echo", "idle", {"friendly_name": "Echo"})
     hass.states.async_set("input_boolean.wecker_aktiv", "off", {})
+    hass.states.async_set("sensor.arbeit", "8", {"friendly_name": "Arbeit"})
+    hass.states.async_set("sun.sun", "above_horizon", {})
 
     view = DacApiView()
     entry = _payload(await view.get(FakeRequest(hass)))["entries"][0]
     entities = entry["entities"]
-    assert "light.bedroom" in [i["id"] for i in entities["lights"]]
-    assert "media_player.echo" in [i["id"] for i in entities["media_players"]]
-    assert "input_boolean.wecker_aktiv" in [i["id"] for i in entities["input_boolean"]]
-    assert entities["lights"][0]["name"]  # friendly names are carried along
+    ids = [i["id"] for i in entities]
+    assert "light.bedroom" in ids
+    assert "media_player.echo" in ids
+    assert "input_boolean.wecker_aktiv" in ids
+    # Sensors and helpers are searchable too – like the classic YAML script.
+    assert "sensor.arbeit" in ids
+    # Noisy internal domains are skipped.
+    assert "sun.sun" not in ids
+    # Every item carries the domain so the panel can filter locally.
+    by_id = {i["id"]: i for i in entities}
+    assert by_id["light.bedroom"]["domain"] == "light"
+    assert by_id["light.bedroom"]["name"] == "Schlafzimmer"
 
 
 async def test_post_test_mode_start_and_cancel(hass: HomeAssistant, loaded_entry) -> None:

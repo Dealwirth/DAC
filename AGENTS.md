@@ -11,19 +11,26 @@ Repo: https://github.com/Dealwirth/DAC
 - JS-Syntaxcheck: `node --check custom_components/dac/www/dac-panel.js`.
 
 ## Architektur (wichtig)
-- **Konfiguration liegt komplett im Sidebar-Panel** (`www/dac-panel.js`, registriert
-  in `frontend.py` über `panel_custom`, Pfad `/dac`). Der Config-Flow stellt keine
-  Fragen und legt nur einen Entry mit `default_options()` an.
+- **Konfiguration liegt komplett in den Sidebar-Panels** (`www/dac-panel.js`,
+  registriert in `frontend.py` über `panel_custom`): Steuerungsseite `/dac`
+  (`<dac-panel>`) und Einstellungsseite `/dac-settings` (`<dac-settings-panel>`,
+  eigenes Sidebar-Icon). Der Config-Flow stellt keine Fragen und legt nur einen
+  Entry mit `default_options()` an.
 - `settings.py` ist die Single Source of Truth für Optionen: `default_options()`,
   `EDITABLE_KEYS`, `coerce_options()`, `build_settings_schema()`, `vacation_keywords()`.
   Neue Optionen immer hier ergänzen (plus `translations/{en,de}.json` und Panel-JS).
-- `http_api.py` (`DacApiView`, `/api/dac`) ist die API des Panels (GET=Zustand,
-  POST=Aktionen). Urlaubstage liegen als Ganztages-Events im `calendar.py`-Store.
+- `http_api.py` (`DacApiView`, `/api/dac`) ist die API beider Panels (GET=Zustand,
+  POST=Aktionen). `entries[].entities` ist EINE flache Liste (`{id, name, domain}`)
+  über `ENTITY_SEARCH_DOMAINS`; das Panel filtert lokal nach Domain + Suchtext
+  (`FIELD_DOMAINS` / `matchesEntity` in `dac-panel.js`). Urlaubstage liegen als
+  Ganztages-Events im `calendar.py`-Store.
 - `coordinator.py` liest Optionen aus **`entry.data` UND `entry.options`** (gemerged) –
   beide Speicherwege (Panel und Options-Flow) müssen identisch funktionieren.
 - `logic.py` ist HA-frei und unit-testbar; `alexa.py` kapselt die Echo-Wecker
-  (Textbefehl mit Befehlstyp `custom`/`tts`, gezieltes Löschen nur des eigenen
+  (Textbefehl immer `media_content_type: custom`, gezieltes Löschen nur des eigenen
   Weckers, Gate-Steuerung `input_boolean.wecker_aktiv`, Vorab-Wecker im Loop).
+  **DAC spielt kein TTS und macht keine Ansagen** – es legt einen echten
+  Echo-Wecker (wie die YAML-Automation) und schaltet im Loop nur das Licht.
   Das Gate setzt DAC selbst (an beim Planen/Klingeln, aus beim Stoppen) – es ist
   ein Sicherheitsnetz, keine Voraussetzung. Echo-Wecker werden mit dem
   konfigurierbaren Stopp-Wort (`CONF_STOP_WORD`) benannt; die Alexa-Routine
@@ -36,8 +43,10 @@ Repo: https://github.com/Dealwirth/DAC
   (nicht in `_stopped_days` eintragen).
 - **Weck-Intervall**: `coordinator.loop_interval_minutes` (Option
   `CONF_LOOP_INTERVAL_MINUTES`, 1–60, Standard 5) steuert die Wiederholung bis
-  zum Stopp. `http_api.py` liefert dem Panel zusätzlich `entities`
-  (Datalist-Vorschläge je Option, Mapping `ENTITY_GROUPS` im Panel-JS).
+  zum Stopp.
+- Entfernte Optionen (`media_players`, `alarm_volume`, `wake_text`,
+  `alexa_command_type`) sind bewusst gelöscht; `coerce_options()` filtert sie aus
+  alten Config-Entries heraus (siehe `test_coerce_options_removed_keys_are_ignored`).
 
 ## Konventionen
 - Kein Dauer-Polling im Panel: der Server ist Single Source of Truth, nach jeder

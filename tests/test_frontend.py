@@ -11,6 +11,8 @@ from homeassistant.core import HomeAssistant
 from custom_components.dac.const import (
     PANEL_ELEMENT,
     PANEL_MODULE_PATH,
+    PANEL_SETTINGS_ELEMENT,
+    PANEL_SETTINGS_URL_PATH,
     PANEL_URL_PATH,
 )
 
@@ -18,7 +20,7 @@ PANEL_JS = Path(__file__).parents[1] / "custom_components/dac/www/dac-panel.js"
 
 
 async def test_panel_registered_in_sidebar(hass: HomeAssistant) -> None:
-    """The DAC panel is added to the sidebar via panel_custom."""
+    """Both DAC panels are added to the sidebar via panel_custom."""
     from custom_components.dac.frontend import async_setup_frontend
 
     hass.http = SimpleNamespace(async_register_static_paths=AsyncMock(return_value=None))
@@ -29,12 +31,18 @@ async def test_panel_registered_in_sidebar(hass: HomeAssistant) -> None:
         await async_setup_frontend(hass)
         await hass.async_block_till_done()
 
-    register.assert_awaited()
-    kwargs = register.await_args.kwargs
-    assert kwargs["frontend_url_path"] == PANEL_URL_PATH
-    assert kwargs["webcomponent_name"] == PANEL_ELEMENT
-    assert kwargs["module_url"] == PANEL_MODULE_PATH
-    assert kwargs["embed_iframe"] is False
+    assert register.await_count == 2
+    by_path = {call.kwargs["frontend_url_path"]: call.kwargs for call in register.await_args_list}
+
+    control = by_path[PANEL_URL_PATH]
+    assert control["webcomponent_name"] == PANEL_ELEMENT
+    assert control["module_url"] == PANEL_MODULE_PATH
+    assert control["embed_iframe"] is False
+
+    settings = by_path[PANEL_SETTINGS_URL_PATH]
+    assert settings["webcomponent_name"] == PANEL_SETTINGS_ELEMENT
+    assert settings["module_url"] == PANEL_MODULE_PATH
+    assert settings["embed_iframe"] is False
 
 
 async def test_static_module_served(hass: HomeAssistant) -> None:
@@ -68,15 +76,15 @@ async def test_panel_registration_idempotent(hass: HomeAssistant) -> None:
     ) as register:
         await async_setup_frontend(hass)
         await hass.async_block_till_done()
-        # Simulate the panel being present from a previous run.
+        # Simulate the panels being present from a previous run.
         hass.data.setdefault(DATA_PANELS, {})[PANEL_URL_PATH] = object()
         await async_setup_frontend(hass)
         await hass.async_block_till_done()
 
-    assert register.await_count == 2
+    assert register.await_count == 4
 
 
-async def test_panel_js_is_valid() -> None:
+def test_panel_js_is_valid() -> None:
     """The shipped panel JS must be syntactically parseable."""
     import shutil
     import subprocess
@@ -93,35 +101,48 @@ async def test_panel_js_is_valid() -> None:
 
 
 def test_panel_element_matches_js() -> None:
-    """The registered element must be defined in the JS module."""
+    """Both registered elements must be defined in the JS module."""
     js = PANEL_JS.read_text(encoding="utf-8")
     assert re.search(rf'customElements\.define\(\s*"{re.escape(PANEL_ELEMENT)}"', js)
+    assert re.search(rf'customElements\.define\(\s*"{re.escape(PANEL_SETTINGS_ELEMENT)}"', js)
 
 
 def test_panel_js_has_core_ui() -> None:
-    """The panel ships simple time inputs, the month calendar and settings fields."""
+    """The panel ships simple time inputs, the month calendar and the test mode."""
     js = PANEL_JS.read_text(encoding="utf-8")
     assert 'type="time"' in js      # native, simple time picker
     assert "data-work" in js        # quick work-time chips
     assert "cal-grid" in js         # real month calendar
-    assert "save_settings" in js    # settings live in the panel
     assert "add_vacation" in js
     assert "alexa_set" in js
-    assert "test_start" in js       # test mode
+    assert "test_start" in js       # test mode integrated into the control page
 
 
-def test_panel_js_offers_entity_suggestions() -> None:
-    """Entity fields get a datalist and clickable suggestion chips."""
+def test_settings_live_on_their_own_page() -> None:
+    """Settings moved to /dac-settings – the control panel has no save button."""
     js = PANEL_JS.read_text(encoding="utf-8")
-    assert "datalist" in js
-    assert "dl-alarm_lights" in js or "dl-${key}" in js
-    assert "data-append" in js
+    assert "dac-settings-panel" in js
+    assert 'href="/dac-settings"' in js
+    assert "save_settings" in js
+    # The settings fieldset is rendered by the settings element, not the control panel.
+    control = js.split("class DacPanel")[1].split("class DacSettingsPanel")[0]
+    assert "save-settings" not in control
 
 
-def test_panel_js_uses_entity_group_mapping() -> None:
-    """The panel maps each option to the entity group from the API payload."""
+def test_panel_js_offers_searchable_entity_suggestions() -> None:
+    """Entity fields get a search input with live suggestion chips."""
     js = PANEL_JS.read_text(encoding="utf-8")
-    assert "ENTITY_GROUPS" in js
-    assert "alarm_lights" in js and "media_players" in js
-    assert "input_boolean" in js
+    assert "data-suggest" in js
+    assert "data-suggestions" in js
+    assert "data-pick" in js
+    assert "matchesEntity" in js
+    assert "FIELD_DOMAINS" in js
+
+
+def test_panel_js_has_no_tts_or_announcements() -> None:
+    """DAC only places real device alarms – no TTS, no announcements."""
+    js = PANEL_JS.read_text(encoding="utf-8")
+    assert "wake_text" not in js
+    assert "media_players" not in js
+    assert '"tts"' not in js
 

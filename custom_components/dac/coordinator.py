@@ -28,22 +28,17 @@ from homeassistant.util import dt as dt_util
 from .alexa import AlexaBridge
 from .const import (
     CONF_ALARM_LIGHTS,
-    CONF_ALARM_VOLUME,
     CONF_DEFAULT_ALARM_TIME,
     CONF_LOOP_INTERVAL_MINUTES,
-    CONF_MEDIA_PLAYERS,
     CONF_NOTIFIER,
     CONF_OFFSET,
     CONF_REMINDER_TEXT,
     CONF_REMINDER_TIME,
     CONF_TEST_MODE_MINUTES,
     CONF_VACATION_CALENDARS,
-    CONF_WAKE_TEXT,
-    DEFAULT_ALARM_VOLUME,
     DEFAULT_LOOP_INTERVAL_MINUTES,
     DEFAULT_REMINDER_TEXT,
     DEFAULT_VACATION_SCAN_TIME,
-    DEFAULT_WAKE_TEXT,
     DOMAIN,
     MAX_LOOP_INTERVAL_MINUTES,
     MIN_LOOP_INTERVAL_MINUTES,
@@ -646,10 +641,12 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._async_fire_once()
 
     async def _async_fire_once(self) -> None:
-        """One loop iteration: lights on + media players announce."""
+        """One loop iteration: turn on the lights, re-place the Echo alarm.
+
+        There is no announcement any more – the Echo rings by itself (DAC sets
+        a real device alarm), the lights are what HA actively switches on.
+        """
         lights = list(self._options.get(CONF_ALARM_LIGHTS) or [])
-        players = list(self._options.get(CONF_MEDIA_PLAYERS) or [])
-        wake_text = str(self._options.get(CONF_WAKE_TEXT) or DEFAULT_WAKE_TEXT)
         for light in lights:
             state = self.hass.states.get(light)
             if state is None or state.state == "off":
@@ -659,38 +656,10 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     )
                 except HomeAssistantError as err:
                     _LOGGER.warning("DAC could not turn on %s: %s", light, err)
-        for player in players:
-            try:
-                await self.hass.services.async_call(
-                    "media_player",
-                    "volume_set",
-                    {"entity_id": player, "volume_level": self._volume},
-                    blocking=True,
-                )
-                await self.hass.services.async_call(
-                    "media_player",
-                    "play_media",
-                    {
-                        "entity_id": player,
-                        "media_content_type": "tts",
-                        "media_content_id": wake_text,
-                    },
-                    blocking=True,
-                )
-            except HomeAssistantError as err:
-                _LOGGER.warning("DAC could not alarm on %s: %s", player, err)
         # Keep a fresh short device alarm on the Echo while ringing (the
-        # wake loop re-places it every 5 minutes until the alarm is stopped).
+        # wake loop re-places it every loop interval until the alarm is
+        # stopped).
         await self.alexa.async_pre_alarm()
-
-    @property
-    def _volume(self) -> float:
-        try:
-            return max(
-                0.0, min(1.0, float(self._options.get(CONF_ALARM_VOLUME, DEFAULT_ALARM_VOLUME)))
-            )
-        except (TypeError, ValueError):
-            return DEFAULT_ALARM_VOLUME
 
     def _sync_gate(self, on: bool) -> None:
         """Mirror the alarm state onto the wecker_aktiv gate (YAML Tag 1/Tag 4).
@@ -703,7 +672,7 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.hass.async_create_task(self.alexa.async_set_gate(on))
 
     async def _async_stop_loop(self, set_state: str | None = None) -> None:
-        """Stop media players and the repeating loop."""
+        """Stop the repeating wake loop and the Echo device alarm."""
         if self._loop_unsub:
             self._loop_unsub()
             self._loop_unsub = None
@@ -711,14 +680,7 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             job()
         self._ringing_jobs = []
         self._test_target = None
-        players = list(self._options.get(CONF_MEDIA_PLAYERS) or [])
-        for player in players:
-            try:
-                await self.hass.services.async_call(
-                    "media_player", "media_stop", {"entity_id": player}, blocking=True
-                )
-            except HomeAssistantError as err:
-                _LOGGER.debug("DAC could not stop %s: %s", player, err)
+        await self.alexa.async_clear_own()
         if set_state:
             self._set_state(set_state)
 

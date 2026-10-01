@@ -108,19 +108,15 @@ async def test_default_fallback_before_default_time(
 async def test_alarm_fires_loop_and_stop(
     hass: HomeAssistant, coordinator: DacCoordinator, recorded
 ):
-    """Reaching the alarm time turns lights on and speaks on the player."""
+    """Reaching the alarm time turns the lights on and the loop stops on stop."""
     await coordinator.async_set_work_time(_fake_call({"time": "15:00"}))
     await _advance_to_alarm(hass, coordinator)
 
     assert coordinator._state == STATE_RINGING
     assert any(d == "light" and s == "turn_on" for d, s, _ in recorded)
-    assert any(
-        d == "media_player" and s == "play_media" for d, s, _ in recorded
-    )
 
     await coordinator.async_stop_alarm(_fake_call({}))
     assert coordinator._state == STATE_STOPPED
-    assert any(d == "media_player" and s == "media_stop" for d, s, _ in recorded)
     # after stop, no new loop ticks fire
     n_before = len(recorded)
     await coordinator._loop_tick(dt_util.now())

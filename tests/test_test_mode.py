@@ -65,12 +65,12 @@ async def test_loop_repeats_with_configured_interval(
     with patcher:
         await coordinator._alarm_fired(dt_util.now())
         await hass.async_block_till_done()
-        first = len([c for c in calls if c[1] == "play_media"])
+        first = len([c for c in calls if c[0] == "light" and c[1] == "turn_on"])
 
         # One interval later the loop must fire again.
         await coordinator._loop_tick(dt_util.now() + timedelta(minutes=1))
         await hass.async_block_till_done()
-        second = len([c for c in calls if c[1] == "play_media"])
+        second = len([c for c in calls if c[0] == "light" and c[1] == "turn_on"])
     assert second > first
 
 
@@ -91,7 +91,7 @@ async def test_test_alarm_arms_and_rings(
         await coordinator._alarm_fired(coordinator._test_target)
         await hass.async_block_till_done()
     assert coordinator._state == "ringing"
-    assert any(c[1] == "play_media" for c in calls)
+    assert any(c[0] == "light" and c[1] == "turn_on" for c in calls)
 
 
 @freeze_time("2026-09-06 10:00:00")

@@ -19,6 +19,9 @@ from homeassistant.core import HomeAssistant, callback
 from .const import (
     PANEL_ELEMENT,
     PANEL_MODULE_PATH,
+    PANEL_SETTINGS_ELEMENT,
+    PANEL_SETTINGS_TITLE,
+    PANEL_SETTINGS_URL_PATH,
     PANEL_TITLE,
     PANEL_URL_PATH,
 )
@@ -27,10 +30,11 @@ _LOGGER = logging.getLogger(__name__)
 
 PANEL_JS = os.path.join(os.path.dirname(__file__), "www", "dac-panel.js")
 PANEL_ICON = "mdi:alarm"
+SETTINGS_ICON = "mdi:cog"
 
 
 async def async_setup_frontend(hass: HomeAssistant) -> None:
-    """Serve the panel module and register the sidebar panel."""
+    """Serve the panel modules and register both sidebar entries."""
     await _async_register_static(hass)
     _async_register_panel(hass)
 
@@ -54,29 +58,53 @@ async def _async_register_static(hass: HomeAssistant) -> None:
 
 @callback
 def _async_register_panel(hass: HomeAssistant) -> None:
-    """Add the DAC panel to the sidebar (idempotent)."""
-    hass.async_create_task(_async_register_panel_impl(hass))
+    """Add the DAC panels to the sidebar (idempotent)."""
+    hass.async_create_task(
+        _async_register_panel_impl(
+            hass,
+            url_path=PANEL_URL_PATH,
+            element=PANEL_ELEMENT,
+            title=PANEL_TITLE,
+            icon=PANEL_ICON,
+        )
+    )
+    hass.async_create_task(
+        _async_register_panel_impl(
+            hass,
+            url_path=PANEL_SETTINGS_URL_PATH,
+            element=PANEL_SETTINGS_ELEMENT,
+            title=PANEL_SETTINGS_TITLE,
+            icon=SETTINGS_ICON,
+        )
+    )
 
 
-async def _async_register_panel_impl(hass: HomeAssistant) -> None:
-    """Register the panel, tolerating an already existing registration."""
+async def _async_register_panel_impl(
+    hass: HomeAssistant,
+    *,
+    url_path: str,
+    element: str,
+    title: str,
+    icon: str,
+) -> None:
+    """Register one panel, tolerating an already existing registration."""
     try:
         await panel_custom.async_register_panel(
             hass,
-            frontend_url_path=PANEL_URL_PATH,
-            webcomponent_name=PANEL_ELEMENT,
-            sidebar_title=PANEL_TITLE,
-            sidebar_icon=PANEL_ICON,
+            frontend_url_path=url_path,
+            webcomponent_name=element,
+            sidebar_title=title,
+            sidebar_icon=icon,
             module_url=PANEL_MODULE_PATH,
             embed_iframe=False,
             config=panel_config(),
             require_admin=False,
         )
-        _LOGGER.info("DAC panel registered at /%s", PANEL_URL_PATH)
+        _LOGGER.info("DAC panel registered at /%s", url_path)
     except ValueError:
-        _LOGGER.debug("DAC panel already registered")
+        _LOGGER.debug("DAC panel /%s already registered", url_path)
     except Exception as err:  # noqa: BLE001 – never break startup over the panel
-        _LOGGER.warning("DAC panel registration failed: %s", err)
+        _LOGGER.warning("DAC panel /%s registration failed: %s", url_path, err)
 
 
 def panel_config() -> dict[str, Any]:
