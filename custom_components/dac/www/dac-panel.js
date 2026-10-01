@@ -1,18 +1,21 @@
 /**
- * DAC – Dynamic Alarm Clock · Sidebar-Panels
+ * DAC – Dynamic Alarm Clock · Dashboard-Panel
  *
- * Zwei Seiten, ein Modul:
- *   <dac-panel>          – /dac           Steuerung: Wecker, Testmodus, Modus, Urlaub
- *   <dac-settings-panel> – /dac-settings  Einstellungen auf eigener Seite
+ * Ein einziges Sidebar-Panel („DAC“, /dac) mit mehreren Seiten:
+ *   Home          – Wecker, Testmodus, Modus, Alexa-Status
+ *   Kalender      – Urlaubskalender + gekoppelte Home-Assistant-Kalender
+ *   Einstellungen – alle Optionen, inkl. Alexa-Suche
+ *   Hilfe         – Kurzanleitung, Alexa-Routine, Dienste
  *
- * Entitäten werden über ein Suchfeld mit Live-Vorschlägen gewählt
- * (Tippen filtert über ALLE Entitäten, Klick übernimmt) – wie im
- * klassischen YAML-Skript, nur komfortabler.
- * Der Testmodus ist direkt in die Steuerungsseite integriert.
+ * Entitäten werden über ein echtes Suchfeld mit Live-Vorschlägen gewählt:
+ * Tippen filtert sofort über Name, Entity-ID und Bereich (Area); passende
+ * Domains stehen zuerst, „auch gefunden“ danach. So findet man einen Echo,
+ * ohne den genauen Entity-Namen zu kennen.
  */
-const DAC_VERSION = "0.6.0";
+const DAC_VERSION = "0.7.0";
 const DAC_AMBER = "#ff9900";
 const DAC_NAVY = "#232f3e";
+const MAX_SUGGESTIONS = 10;
 
 const WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const MONTHS = [
@@ -20,8 +23,7 @@ const MONTHS = [
   "Juli", "August", "September", "Oktober", "November", "Dezember",
 ];
 
-// Der Server liefert eine flache Liste aller Entitäten; pro Feld wird nach
-// diesen Domains gefiltert (null = alle Domains durchsuchbar).
+// Pro Feld erlaubte Domains; null = alle Domains durchsuchbar.
 const FIELD_DOMAINS = {
   alarm_lights: ["light", "switch"],
   vacation_calendars: ["calendar"],
@@ -30,14 +32,16 @@ const FIELD_DOMAINS = {
   alexa_enabled_boolean: ["input_boolean"],
 };
 
-// Bekannte Beispiele, falls ein Feld noch keine Entitäten kennt.
 const FIELD_EXAMPLES = {
-  alarm_lights: "light.schlafzimmer",
-  vacation_calendars: "calendar.feiertage",
-  alexa_media_player: "media_player.echo",
-  alexa_text_helper: "input_text.gestellter_alexa_wecker",
-  alexa_enabled_boolean: "input_boolean.wecker_aktiv",
+  alarm_lights: "z. B. Schlafzimmer",
+  vacation_calendars: "z. B. Feiertage",
+  alexa_media_player: "z. B. Echo, Küche …",
+  alexa_text_helper: "z. B. gestellter Wecker",
+  alexa_enabled_boolean: "z. B. wecker aktiv",
 };
+
+// Felder, die mehrere Entitäten halten (Chips + reine Suche im Eingabefeld).
+const MULTI_FIELDS = { alarm_lights: true, vacation_calendars: true };
 
 function esc(value) {
   const div = document.createElement("div");
@@ -66,6 +70,14 @@ function dateLabel(value) {
   if (!value) return "";
   const d = new Date(value);
   return d.toLocaleDateString("de-DE", { weekday: "long", day: "2-digit", month: "long" });
+}
+
+function dayLabel(iso) {
+  if (!iso) return "";
+  const [y, m, d] = String(iso).split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("de-DE", {
+    weekday: "short", day: "2-digit", month: "2-digit",
+  });
 }
 
 function localIso(date) {
@@ -113,14 +125,41 @@ function listToText(value) {
   return value || "";
 }
 
-function matchesEntity(item, query, domains) {
-  if (domains && domains.length && !domains.includes(item.domain)) return false;
-  if (!query) return true;
-  const q = query.toLowerCase();
-  return item.id.toLowerCase().includes(q) || (item.name || "").toLowerCase().includes(q);
+function splitList(value) {
+  return String(value || "").split(",").map((part) => part.trim()).filter(Boolean);
 }
 
-/** Basisklasse: lädt den API-Zustand und hält die Einstellungen. */
+/**
+ * Sucht Entitäten: passende Domains zuerst, danach Treffer aus anderen
+ * Domains ("auch gefunden"). Query trifft Name, Entity-ID und Bereich.
+ */
+function searchEntities(items, query, domains) {
+  const q = String(query || "").trim().toLowerCase();
+  const inDomain = [];
+  const others = [];
+  for (const item of items) {
+    if (!q) {
+      if (!domains || domains.includes(item.domain)) inDomain.push(item);
+      continue;
+    }
+    const haystack = [item.id, item.name, item.area || ""].join(" ").toLowerCase();
+    if (!haystack.includes(q)) continue;
+    if (!domains || domains.includes(item.domain)) inDomain.push(item);
+    else others.push(item);
+  }
+  const rank = (a, b) => {
+    const an = (a.name || "").toLowerCase().startsWith(q) ? 0 : 1;
+    const bn = (b.name || "").toLowerCase().startsWith(q) ? 0 : 1;
+    if (an !== bn) return an - bn;
+    if (a.alexa !== b.alexa) return a.alexa ? -1 : 1;
+    return (a.name || a.id).localeCompare(b.name || b.id);
+  };
+  inDomain.sort(rank);
+  others.sort(rank);
+  return { primary: inDomain.slice(0, MAX_SUGGESTIONS), extra: others.slice(0, 5) };
+}
+
+/** Basisklasse: lädt den API-Zustand, hält Einstellungen und die Seiten-Navigation. */
 class DacBase extends HTMLElement {
   constructor() {
     super();
@@ -132,6 +171,7 @@ class DacBase extends HTMLElement {
     this._entryIndex = 0;
     this._settings = {};
     this._dirty = false;
+    this._page = "home";
   }
 
   set hass(hass) {
@@ -140,7 +180,13 @@ class DacBase extends HTMLElement {
     if (first && !this._data) this._refresh();
   }
 
-  set panel(panel) { this._panel = panel; }
+  set panel(panel) {
+    this._panel = panel;
+    // Deep-Link: /dac-settings öffnet direkt die Einstellungs-Seite.
+    const path = (panel && panel.config && panel.config.route) || window.location.pathname;
+    if (String(path).includes("settings")) this._page = "settings";
+  }
+
   set narrow(narrow) { this._narrow = narrow; }
 
   entries() {
@@ -186,6 +232,21 @@ class DacBase extends HTMLElement {
     await this._refresh();
   }
 
+  _toast(message) {
+    if (!message) return;
+    const el = this.shadowRoot.querySelector(".toast");
+    if (!el) return;
+    el.textContent = message;
+    el.classList.add("on");
+    clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(() => el.classList.remove("on"), 2600);
+  }
+
+  _go(page) {
+    this._page = page;
+    this._render();
+  }
+
   _errorView() {
     return `<style>${STYLES}</style>
       <div class="wrap"><div class="banner error">⚠️ ${esc(this._error)}</div></div>`;
@@ -201,8 +262,8 @@ class DacBase extends HTMLElement {
 
   _tabs() {
     if (this.entries().length <= 1) return "";
-    return `<div class="tabs">${this.entries().map((e, i) =>
-      `<button class="tab ${i === this._entryIndex ? "on" : ""}" data-entry="${i}">${esc(e.entry_id.slice(0, 6))}</button>`).join("")}</div>`;
+    return `<div class="entries">${this.entries().map((e, i) =>
+      `<button class="tab ${i === this._entryIndex ? "on" : ""}" data-entry="${i}">Wecker ${i + 1}</button>`).join("")}</div>`;
   }
 
   _wireTabs() {
@@ -215,73 +276,145 @@ class DacBase extends HTMLElement {
       });
   }
 
+  /** Kopfzeile mit Seitennavigation – ein Dashboard, mehrere Seiten. */
+  _nav(tone) {
+    const pages = [
+      ["home", "🏠 Home"],
+      ["calendar", "📅 Kalender"],
+      ["settings", "⚙️ Einstellungen"],
+      ["help", "❓ Hilfe"],
+    ];
+    return `
+      <nav class="nav tone-${tone}">
+        <div class="nav-top">
+          <span class="brand">⏰ DAC</span>
+          <span class="nav-sub">${esc(this._pageTitle())}</span>
+        </div>
+        <div class="nav-pages">
+          ${pages.map(([key, label]) =>
+            `<button class="page ${this._page === key ? "on" : ""}" data-page="${key}">${label}</button>`).join("")}
+        </div>
+      </nav>`;
+  }
+
+  _pageTitle() {
+    return {
+      home: "Wecker & Steuerung",
+      calendar: "Urlaub & Kalender",
+      settings: "Einstellungen",
+      help: "Hilfe & Einrichtung",
+    }[this._page] || "DAC";
+  }
+
+  _wireNav() {
+    this.shadowRoot.querySelectorAll("[data-page]").forEach((btn) =>
+      btn.onclick = () => this._go(btn.dataset.page));
+  }
+
   // ------------------------------------------------------- entity search UI
-  /** Ein Entity-Feld: Suchfeld + Live-Vorschläge (Klick übernimmt). */
+  /** Ein Entity-Feld: Suchfeld + Live-Vorschläge (Klick übernimmt).
+   *
+   * Mehrfachfelder zeigen ihre Auswahl als Chips und das Eingabefeld ist eine
+   * reine Suche; Einzelfelder zeigen den Wert im Feld selbst (bearbeitbar).
+   */
   _entityField(key, label, value, { multi = false } = {}) {
-    const domains = FIELD_DOMAINS[key] || null;
     const current = listToText(value);
-    const placeholder = FIELD_EXAMPLES[key] || "suchen…";
+    const chips = multi
+      ? splitList(current).map((id) =>
+        `<button class="chosen" data-unpick="${key}" data-value="${esc(id)}" title="Entfernen">${esc(this._entityName(id))} <b>✕</b></button>`).join("")
+      : "";
+    const input = multi
+      ? `<input class="inp search" type="text" data-search="${key}" autocomplete="off"
+           placeholder="${esc(FIELD_EXAMPLES[key] || "🔍 Name oder Bereich eingeben …")}" />`
+      : `<input class="inp search" type="text" data-field="${key}" data-search="${key}" autocomplete="off"
+           value="${esc(current)}" placeholder="${esc(FIELD_EXAMPLES[key] || "🔍 Name oder Bereich eingeben …")}" />`;
     return `<div class="field entity-field" data-efield="${key}">
       <span>${esc(label)}</span>
-      <input class="inp search" type="text" data-field="${key}" data-multi="${multi ? "true" : "false"}"
-        autocomplete="off" value="${esc(current)}" placeholder="${esc(placeholder)}" />
-      <input class="inp suggest-input" type="text" data-suggest="${key}" autocomplete="off"
-        placeholder="🔍 suchen – Vorschläge erscheinen beim Tippen" />
+      ${multi ? `<div class="chosen-row">${chips || `<span class="muted">noch nichts gewählt</span>`}</div>` : ""}
+      ${input}
       <div class="suggestions" data-suggestions="${key}"></div>
-      ${multi ? `<span class="hint">Mehrere mit Komma trennen.</span>` : ""}
+      ${multi ? `<span class="hint">Mehrere per Klick hinzufügen – die Suche bleibt danach offen.</span>` : ""}
     </div>`;
+  }
+
+  _entityName(id) {
+    const found = this.entities().find((item) => item.id === id);
+    return found ? found.name : id;
   }
 
   /** Vorschlagsliste für ein Suchfeld neu aufbauen. */
   _updateSuggestions(key) {
     const box = this.shadowRoot.querySelector(`[data-suggestions="${key}"]`);
-    const input = this.shadowRoot.querySelector(`[data-suggest="${key}"]`);
+    const input = this.shadowRoot.querySelector(`[data-search="${key}"]`);
     if (!box) return;
     const query = (input && input.value || "").trim();
     const domains = FIELD_DOMAINS[key] || null;
-    const chosen = new Set(
-      String(this._settings[key] || "").split(",").map((p) => p.trim()).filter(Boolean)
-    );
-    const items = this.entities()
-      .filter((item) => matchesEntity(item, query, domains))
-      .filter((item) => !chosen.has(item.id))
-      .slice(0, 8);
-    if (!items.length) {
-      box.innerHTML = `<span class="muted">Keine passenden Entitäten.</span>`;
+    const chosen = new Set(splitList(this._settings[key]));
+    const { primary, extra } = searchEntities(this.entities(), query, domains);
+    const usable = primary.filter((item) => !chosen.has(item.id));
+    const extraUsable = extra.filter((item) => !chosen.has(item.id));
+    if (!usable.length && !extraUsable.length) {
+      box.innerHTML = query
+        ? `<span class="muted">Nichts gefunden für „${esc(query)}“.</span>`
+        : `<span class="muted">Tippen, um zu suchen.</span>`;
       return;
     }
-    box.innerHTML = items.map((item) =>
-      `<button class="chip suggest" data-pick="${key}" data-value="${esc(item.id)}">
-        ${esc(item.name)} <em>${esc(item.id)}</em></button>`).join("");
+    const render = (items) => items.map((item) =>
+      `<button class="chip suggest ${item.alexa ? "alexa" : ""}" data-pick="${key}" data-value="${esc(item.id)}">
+        ${item.alexa ? "🔊 " : ""}${esc(item.name)}
+        <em>${esc(item.id)}${item.area ? ` · ${esc(item.area)}` : ""}</em></button>`).join("");
+    box.innerHTML = render(usable) + (extraUsable.length
+      ? `<span class="extra-label">auch gefunden</span>${render(extraUsable)}`
+      : "");
     box.querySelectorAll("[data-pick]").forEach((btn) =>
       btn.onclick = () => this._pickEntity(key, btn.dataset.value));
   }
 
   _pickEntity(key, value) {
-    const field = this.shadowRoot.querySelector(`[data-field="${key}"]`);
-    const multi = field && field.dataset.multi === "true";
-    const parts = String(this._settings[key] || "")
-      .split(",").map((p) => p.trim()).filter(Boolean);
+    const multi = this._isMulti(key);
     if (multi) {
+      const parts = splitList(this._settings[key]);
       if (!parts.includes(value)) parts.push(value);
       this._settings[key] = parts.join(", ");
     } else {
       this._settings[key] = value;
     }
-    if (field) field.value = this._settings[key];
-    const search = this.shadowRoot.querySelector(`[data-suggest="${key}"]`);
-    if (search) search.value = "";
     this._dirty = true;
-    this._refreshDirty();
-    this._updateSuggestions(key);
+    this._render();
+    // Keep focus on the field so selecting several entities stays quick.
+    const again = this.shadowRoot.querySelector(`[data-search="${key}"]`);
+    if (again) again.focus();
+    this._toast(`${this._entityName(value)} übernommen`);
+  }
+
+  _isMulti(key) {
+    if (MULTI_FIELDS[key]) return true;
+    const field = this.shadowRoot.querySelector(`[data-field="${key}"]`);
+    return !!(field && field.dataset.multi === "true");
+  }
+
+  _unpickEntity(key, value) {
+    this._settings[key] = splitList(this._settings[key]).filter((id) => id !== value).join(", ");
+    this._dirty = true;
+    this._render();
   }
 
   _wireEntityFields() {
-    this.shadowRoot.querySelectorAll("[data-suggest]").forEach((input) => {
-      const key = input.dataset.suggest;
-      input.oninput = () => this._updateSuggestions(key);
+    this.shadowRoot.querySelectorAll("[data-search]").forEach((input) => {
+      const key = input.dataset.search;
+      const multi = this._isMulti(key);
+      input.oninput = () => {
+        if (!multi) {
+          this._settings[key] = input.value;
+          this._dirty = true;
+          this._refreshDirty();
+        }
+        this._updateSuggestions(key);
+      };
       input.onfocus = () => this._updateSuggestions(key);
     });
+    this.shadowRoot.querySelectorAll("[data-unpick]").forEach((btn) =>
+      btn.onclick = () => this._unpickEntity(btn.dataset.unpick, btn.dataset.value));
     Object.keys(FIELD_DOMAINS).forEach((key) => {
       if (this.shadowRoot.querySelector(`[data-suggestions="${key}"]`)) {
         this._updateSuggestions(key);
@@ -293,7 +426,7 @@ class DacBase extends HTMLElement {
   _wireSettingsFields() {
     this.shadowRoot.querySelectorAll("[data-field]").forEach((input) => {
       const key = input.dataset.field;
-      if (input.dataset.suggest) return;
+      if (input.dataset.search) return;
       input.oninput = () => {
         const value = input.type === "checkbox" ? input.checked : input.value;
         this._settings[key] = input.classList.contains("time") && value ? `${value}:00` : value;
@@ -351,7 +484,7 @@ class DacBase extends HTMLElement {
 }
 
 /* ==========================================================================
- * Steuerungsseite  (/dac)
+ * Dashboard-Panel  (/dac)
  * ========================================================================== */
 class DacPanel extends DacBase {
   constructor() {
@@ -363,6 +496,7 @@ class DacPanel extends DacBase {
 
   connectedCallback() {
     this._render();
+    this._refresh();
     this._clock = setInterval(() => this._tick(), 1000);
   }
 
@@ -390,22 +524,28 @@ class DacPanel extends DacBase {
     if (this._error) { this.shadowRoot.innerHTML = this._errorView(); return; }
     const entry = this.entry();
     if (!entry) { this.shadowRoot.innerHTML = this._emptyView(); return; }
-    this.shadowRoot.innerHTML = `<style>${STYLES}</style>${this._body(entry)}<div id="dialog"></div>`;
+    const views = {
+      home: () => this._home(entry),
+      calendar: () => this._calendarPage(entry),
+      settings: () => this._settingsPage(entry),
+      help: () => this._helpPage(entry),
+    };
+    const body = (views[this._page] || views.home)();
+    this.shadowRoot.innerHTML =
+      `<style>${STYLES}</style><div class="wrap">${this._nav(statusOf(entry).tone)}${body}${this._tabs()}<div class="toast"></div></div>`;
     this._wire();
   }
 
-  _body(entry) {
+  // ------------------------------------------------------------------- Home
+  _home(entry) {
     const status = statusOf(entry);
     const ringing = entry.state === "ringing";
-    const cal = entry.calendar || { own: [], external: [] };
     const alexa = entry.alexa || {};
-
     return `
-    <div class="wrap">
       <header class="hero tone-${status.tone}">
         <div class="hero-top">
-          <span class="brand">⏰ DAC</span>
-          <a class="pill link" href="/dac-settings">⚙️ Einstellungen</a>
+          <span class="brand">Nächster Wecker</span>
+          ${ringing ? `<span class="pill">klingelt</span>` : ""}
         </div>
         <div class="clock">${clockNow()}</div>
         <div class="status"><span class="dot"></span>${esc(status.label)}</div>
@@ -422,15 +562,7 @@ class DacPanel extends DacBase {
         ${this._cardTestMode(entry, this._settings)}
         ${this._cardMode(entry)}
         ${this._cardAlexa(alexa)}
-      </div>
-
-      <section class="card wide">
-        <h3>Urlaubskalender</h3>
-        ${this._calendar(cal)}
-      </section>
-      ${this._tabs()}
-      <div class="foot">DAC ${esc(DAC_VERSION)} · Einstellungen auf der eigenen Seite „DAC Einstellungen“.</div>
-    </div>`;
+      </div>`;
   }
 
   _cardWorkTime(entry, s) {
@@ -491,20 +623,71 @@ class DacPanel extends DacBase {
       <section class="card">
         <h3>Alexa (Echo-Wecker)</h3>
         <div class="kv"><span>Status</span><b>${alexa.enabled ? "aktiv" : "aus"}</b></div>
-        <div class="kv"><span>Echo</span><b>${esc(alexa.player || "—")}</b></div>
+        <div class="kv"><span>Echo</span><b>${esc(alexa.player ? this._entityName(alexa.player) : "—")}</b></div>
         <div class="kv"><span>Gesetzter Wecker</span><b>${esc(alexa.stored_alarm || "keiner")}</b></div>
         <div class="row">
           <button class="btn" id="alexa-set">Wecker setzen</button>
           <button class="btn ghost" id="alexa-sync">Sync</button>
           <button class="btn danger" id="alexa-clear">Löschen</button>
         </div>
-        <p class="hint">
-          Stoppen per Sprache: In der Alexa-App eine Routine <b>„${esc(routine)}“</b> anlegen –
-          Auslöser „Wecker mit dem Namen <b>${esc(stopWord)}</b> klingelt“, Aktion „Smart-Home-Gerät“ → DAC → Wecker stoppen.
-          DAC benennt seine Echo-Wecker mit genau diesem Namen.
-        </p>
-        ${alexa.enabled ? "" : `<p class="hint">Aktiviere Alexa auf der Seite <a href="/dac-settings">DAC Einstellungen</a> und wähle deinen Echo.</p>`}
+        ${alexa.enabled ? "" : `<p class="hint">Aktiviere Alexa und wähle deinen Echo auf der Seite <button class="linklike" data-page="settings">Einstellungen</button> – dort genügt ein Suchbegriff wie „Echo“.</p>`}
+        <p class="hint">Stoppen per Sprache: Alexa-App → Routine <b>„${esc(routine)}“</b>, Auslöser „Wecker mit dem Namen <b>${esc(stopWord)}</b> klingelt“, Aktion „Smart-Home-Gerät → DAC → Wecker stoppen“.</p>
       </section>`;
+  }
+
+  // --------------------------------------------------------------- Kalender
+  _calendarPage(entry) {
+    const cal = entry.calendar || { own: [], external: [], home_calendars: [] };
+    const calendars = entry.calendars || [];
+    const home = cal.home_calendars || [];
+    return `
+      <section class="card wide">
+        <h3>Urlaubskalender</h3>
+        <p class="muted">Tage markieren und mit einem Namen speichern. DAC legt sie im eigenen Kalender ab – sie erscheinen auch in Home Assistant.</p>
+        ${this._calendar(cal)}
+      </section>
+
+      <section class="card wide">
+        <h3>Home-Assistant-Kalender</h3>
+        <p class="muted">Welche Kalender DAC als Urlaub/Feiertag wertet, stellst du in den <button class="linklike" data-page="settings">Einstellungen</button> ein.</p>
+        ${this._calendarList(calendars)}
+        <h4>Termine im Zeitraum</h4>
+        ${this._homeEvents(home)}
+      </section>`;
+  }
+
+  _calendarList(calendars) {
+    if (!calendars.length) return `<p class="muted">Keine Kalender-Entitäten gefunden.</p>`;
+    return `<div class="lists">${calendars.map((cal) => {
+      const tags = [
+        cal.is_own ? `<span class="tag own">DAC-Urlaub</span>` : "",
+        cal.is_vacation ? `<span class="tag vac">Urlaub/Feiertag</span>` : "",
+      ].join("");
+      return `<div class="item">
+        <span>${esc(cal.name)}<em class="muted"> ${esc(cal.id)}</em></span>
+        <span>${tags || `<span class="tag">—</span>`}</span>
+      </div>`;
+    }).join("")}</div>`;
+  }
+
+  _homeEvents(events) {
+    if (!events.length) {
+      return `<p class="muted">Keine Termine. Wähle in den Einstellungen Kalender aus, um sie hier zu sehen.</p>`;
+    }
+    return `<div class="events">${events.slice(0, 60).map((ev) => `
+      <div class="item">
+        <span>${esc(dayLabel(ev.date))}${ev.all_day ? "" : ` · ${esc(this._eventTime(ev))}`}</span>
+        <span>${esc(ev.summary)}</span>
+        <button class="btn tiny" data-import="${esc(ev.date)}" data-summary="${esc(ev.summary)}" data-source="${esc(ev.calendar)}">als Urlaub</button>
+      </div>`).join("")}</div>`;
+  }
+
+  _eventTime(ev) {
+    const start = ev.start ? new Date(ev.start) : null;
+    const end = ev.end ? new Date(ev.end) : null;
+    if (!start || isNaN(start)) return "";
+    const fmt = (d) => d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+    return end && !isNaN(end) ? `${fmt(start)}–${fmt(end)}` : fmt(start);
   }
 
   _calendar(cal) {
@@ -512,6 +695,8 @@ class DacPanel extends DacBase {
     (cal.own || []).forEach((d) => { own[d.date] = d; });
     const external = {};
     (cal.external || []).forEach((d) => { external[d.date] = d; });
+    const home = {};
+    (cal.home_calendars || []).forEach((d) => { home[d.date] = d; });
 
     const year = this._month.getFullYear();
     const month = this._month.getMonth();
@@ -528,15 +713,17 @@ class DacPanel extends DacBase {
         "cell",
         own[iso] ? "own" : "",
         external[iso] ? "ext" : "",
+        home[iso] ? "home" : "",
         this._selected.has(iso) ? "sel" : "",
         iso === todayIso ? "today" : "",
       ].join(" ");
-      cells.push(`<button class="${cls}" data-day="${iso}" title="${esc(own[iso]?.summary || external[iso]?.summary || "")}">${day}</button>`);
+      const title = own[iso]?.summary || external[iso]?.summary || home[iso]?.summary || "";
+      cells.push(`<button class="${cls}" data-day="${iso}" title="${esc(title)}">${day}</button>`);
     }
 
     const selectedList = [...this._selected].sort();
-    const ownList = (cal.own || []).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 40);
-    const extList = (cal.external || []).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 40);
+    const ownList = (cal.own || []).slice().sort((a, b) => a.date.localeCompare(b.date)).slice(0, 40);
+    const extList = (cal.external || []).slice().sort((a, b) => a.date.localeCompare(b.date)).slice(0, 40);
 
     return `
       <div class="cal-head">
@@ -549,6 +736,7 @@ class DacPanel extends DacBase {
       <div class="legend">
         <span><i class="dot own"></i> Urlaub (DAC)</span>
         <span><i class="dot ext"></i> aus Kalender</span>
+        <span><i class="dot home"></i> HA-Termin</span>
         <span><i class="dot sel"></i> ausgewählt</span>
       </div>
       <div class="row">
@@ -560,20 +748,123 @@ class DacPanel extends DacBase {
         <div>
           <h4>Eigene Urlaubstage</h4>
           ${ownList.length ? ownList.map((d) => `<div class="item">
-            <span>${esc(d.date)}</span><span class="muted">${esc(d.summary)}</span>
+            <span>${esc(dayLabel(d.date))}</span><span class="muted">${esc(d.summary)}</span>
             <button class="btn tiny danger" data-remove="${esc(d.uid)}">✕</button>
           </div>`).join("") : `<p class="muted">Noch keine Urlaubstage.</p>`}
         </div>
         <div>
           <h4>Aus Kalendern erkannt</h4>
           ${extList.length ? extList.map((d) => `<div class="item">
-            <span>${esc(d.date)}</span><span class="muted">${esc(d.summary)}</span>
+            <span>${esc(dayLabel(d.date))}</span><span class="muted">${esc(d.summary)}</span>
           </div>`).join("") : `<p class="muted">Keine externen Urlaubstage im Zeitraum.</p>`}
         </div>
       </div>`;
   }
 
+  // ------------------------------------------------------------ Einstellungen
+  _settingsPage() {
+    const s = this._settings;
+    return `
+      <section class="card wide">
+        <div class="fieldsets">
+          ${this._fieldsetZeiten(s)}
+          ${this._fieldsetGeraete(s)}
+          ${this._fieldsetAlexa(s)}
+        </div>
+        <div class="row end">
+          <span class="dirty ${this._dirty ? "on" : ""}">${this._dirty ? "Ungespeicherte Änderungen" : "Alles gespeichert"}</span>
+          <button class="btn" id="save-settings">Einstellungen speichern</button>
+        </div>
+      </section>`;
+  }
+
+  _fieldsetZeiten(s) {
+    return `
+      <fieldset class="fieldset">
+        <legend>Zeiten &amp; Weckzyklus</legend>
+        <div class="fields">
+          ${this._fieldTime("default_alarm_time", "Standard-Weckzeit (Fallback)", s.default_alarm_time)}
+          ${this._fieldNumber("offset_minutes", "Offset vor Arbeitsbeginn", s.offset_minutes, 0, 600, 5, "min")}
+          ${this._fieldNumber("loop_interval_minutes", "Weck-Wiederholung", s.loop_interval_minutes, 1, 60, 1, "min")}
+          ${this._fieldNumber("test_mode_minutes", "Testwecker nach", s.test_mode_minutes, 1, 120, 1, "min")}
+          ${this._fieldTime("reminder_time", "Tägliche Erinnerung", s.reminder_time)}
+          ${this._fieldText("reminder_text", "Erinnerungstext ({alarm_time})", s.reminder_text, "Denk an die Arbeitszeit!")}
+          ${this._fieldText("vacation_keywords", "Urlaubs-Schlagwörter (Komma-getrennt)", s.vacation_keywords, "urlaub, feiertag")}
+        </div>
+      </fieldset>`;
+  }
+
+  _fieldsetGeraete(s) {
+    return `
+      <fieldset class="fieldset">
+        <legend>Geräte &amp; Benachrichtigung</legend>
+        <div class="fields">
+          ${this._entityField("alarm_lights", "Weck-Lichter", s.alarm_lights, { multi: true })}
+          ${this._entityField("vacation_calendars", "Urlaubs-Kalender", s.vacation_calendars, { multi: true })}
+          ${this._fieldText("notifier", "Benachrichtigungsdienst", s.notifier, "notify.mobile_app_…")}
+        </div>
+      </fieldset>`;
+  }
+
+  _fieldsetAlexa(s) {
+    return `
+      <fieldset class="fieldset">
+        <legend>Alexa (Echo-Wecker)</legend>
+        <div class="fields">
+          ${this._fieldSwitch("alexa_enabled", "Echten Wecker auf dem Echo stellen", s.alexa_enabled)}
+          ${this._entityField("alexa_media_player", "Echo (Alexa)", s.alexa_media_player)}
+          ${this._entityField("alexa_text_helper", "Helfer: gesetzter Wecker", s.alexa_text_helper)}
+          ${this._entityField("alexa_enabled_boolean", "Helfer: Wecker aktiv", s.alexa_enabled_boolean)}
+          ${this._fieldNumber("pre_alarm_minutes", "Vorab-Wecker Echo", s.pre_alarm_minutes, 0, 30, 1, "min")}
+          ${this._fieldText("stop_word", "Stopp-Wort (Name des Echo-Weckers)", s.stop_word, "Wecker aus")}
+        </div>
+      </fieldset>`;
+  }
+
+  // ------------------------------------------------------------------- Hilfe
+  _helpPage(entry) {
+    const alexa = entry.alexa || {};
+    return `
+      <section class="card wide">
+        <h3>So funktioniert DAC</h3>
+        <ol class="steps">
+          <li><b>Arbeitsbeginn setzen</b> – auf der Seite <button class="linklike" data-page="home">Home</button> per Uhrzeit, Schnellwahl oder Dienst <code>dac.set_work_time</code> (z. B. NFC-Tag).</li>
+          <li><b>Weckzeit</b> – DAC rechnet automatisch Arbeitsbeginn − Offset und stellt den Wecker.</li>
+          <li><b>Wecken</b> – Lichter gehen an, der Echo klingelt über seinen eigenen Wecker (kein TTS).</li>
+          <li><b>Urlaub</b> – Tage im <button class="linklike" data-page="calendar">Kalender</button> markieren oder HA-Kalender koppeln; DAC weckt dann nicht.</li>
+          <li><b>Testen</b> – im Testmodus klingelt die komplette Kette gefahrlos in X Minuten.</li>
+        </ol>
+      </section>
+
+      <section class="card wide">
+        <h3>Alexa einrichten (ohne genauen Namen zu kennen)</h3>
+        <p class="muted">Auf der Seite <button class="linklike" data-page="settings">Einstellungen</button> genügt ein Suchbegriff – z. B. „Echo“ oder der Raumname. DAC schlägt alle passenden Geräte vor.</p>
+        <div class="steps">
+          <p>1. Einstellungen → „Echo (Alexa)“ → tippen und Vorschlag anklicken.</p>
+          <p>2. Optional die beiden Helfer wählen: <code>input_text</code> (gesetzter Wecker) und <code>input_boolean</code> (Wecker aktiv).</p>
+          <p>3. In der Alexa-App eine Routine <b>„${esc(alexa.routine_name || "DAC Stopp")}“</b> anlegen: Auslöser „Wecker mit dem Namen <b>${esc(alexa.stop_word || "Wecker aus")}</b> klingelt“, Aktion „Smart-Home-Gerät → DAC → Wecker stoppen“.</p>
+        </div>
+      </section>
+
+      <section class="card wide">
+        <h3>Dienste</h3>
+        <div class="kv"><span>dac.set_work_time</span><b>Arbeitsbeginn setzen (NFC)</b></div>
+        <div class="kv"><span>dac.stop_alarm</span><b>Wecker stoppen (auch von Alexa-Routine)</b></div>
+        <div class="kv"><span>dac.start_test_alarm</span><b>Testwecker starten</b></div>
+        <div class="kv"><span>dac.cancel_test_alarm</span><b>Testwecker abbrechen</b></div>
+        <div class="kv"><span>dac.dismiss_for_today</span><b>Für heute deaktivieren</b></div>
+        <div class="kv"><span>dac.set_alexa_alarm</span><b>Echo-Wecker setzen</b></div>
+        <div class="kv"><span>dac.clear_alexa_alarm</span><b>DAC-eigenen Echo-Wecker löschen</b></div>
+      </section>`;
+  }
+
+  // ------------------------------------------------------------------ wiring
   _wire() {
+    this._wireNav();
+    this._wireTabs();
+    this._wireSettingsFields();
+    this._wireEntityFields();
+
     const q = (sel) => this.shadowRoot.querySelector(sel);
     const stop = q("#stop");
     if (stop) stop.onclick = () => this._action({ action: "stop" });
@@ -641,7 +932,17 @@ class DacPanel extends DacBase {
     this.shadowRoot.querySelectorAll("[data-remove]").forEach((btn) =>
       btn.onclick = () => this._action({ action: "remove_vacation", uid: btn.dataset.remove }));
 
-    this._wireTabs();
+    this.shadowRoot.querySelectorAll("[data-import]").forEach((btn) =>
+      btn.onclick = () => this._action({
+        action: "import_vacation",
+        date: btn.dataset.import,
+        summary: btn.dataset.summary,
+        source: btn.dataset.source,
+      }));
+
+    const save = q("#save-settings");
+    if (save) save.onclick = () =>
+      this._action({ action: "save_settings", settings: this._settings });
   }
 
   _selectRange(fromIso, toIso) {
@@ -660,123 +961,26 @@ class DacPanel extends DacBase {
   }
 }
 
-/* ==========================================================================
- * Einstellungsseite  (/dac-settings)
- * ========================================================================== */
-class DacSettingsPanel extends DacBase {
-  connectedCallback() {
-    this._render();
-    this._refresh();
-  }
-
-  getCardSize() { return 20; }
-
-  _render() {
-    if (this._error) { this.shadowRoot.innerHTML = this._errorView(); return; }
-    const entry = this.entry();
-    if (!entry) { this.shadowRoot.innerHTML = this._emptyView(); return; }
-    this.shadowRoot.innerHTML = `<style>${STYLES}</style>${this._body(entry)}`;
-    this._wire();
-  }
-
-  _body(entry) {
-    const s = this._settings;
-    return `
-    <div class="wrap">
-      <header class="hero tone-settings">
-        <div class="hero-top">
-          <span class="brand">⚙️ DAC Einstellungen</span>
-          <a class="pill link" href="/dac">⏰ Steuerung</a>
-        </div>
-        <div class="status"><span class="dot"></span>Alles hier speichern – der Einrichtungsassistent fragt nichts ab.</div>
-      </header>
-
-      <section class="card wide">
-        <div class="fieldsets">
-          ${this._fieldsetZeiten(s)}
-          ${this._fieldsetGeraete(s)}
-          ${this._fieldsetAlexa(s)}
-        </div>
-        <div class="row end">
-          <span class="dirty ${this._dirty ? "on" : ""}">${this._dirty ? "Ungespeicherte Änderungen" : "Alles gespeichert"}</span>
-          <button class="btn" id="save-settings">Einstellungen speichern</button>
-        </div>
-      </section>
-      ${this._tabs()}
-      <div class="foot">DAC ${esc(DAC_VERSION)}</div>
-    </div>`;
-  }
-
-  _fieldsetZeiten(s) {
-    return `
-      <fieldset class="fieldset">
-        <legend>Zeiten &amp; Weckzyklus</legend>
-        <div class="fields">
-          ${this._fieldTime("default_alarm_time", "Standard-Weckzeit (Fallback)", s.default_alarm_time)}
-          ${this._fieldNumber("offset_minutes", "Offset vor Arbeitsbeginn", s.offset_minutes, 0, 600, 5, "min")}
-          ${this._fieldNumber("loop_interval_minutes", "Weck-Wiederholung", s.loop_interval_minutes, 1, 60, 1, "min")}
-          ${this._fieldNumber("test_mode_minutes", "Testwecker nach", s.test_mode_minutes, 1, 120, 1, "min")}
-          ${this._fieldTime("reminder_time", "Tägliche Erinnerung", s.reminder_time)}
-          ${this._fieldText("reminder_text", "Erinnerungstext ({alarm_time})", s.reminder_text, "Denk an die Arbeitszeit!")}
-          ${this._fieldText("vacation_keywords", "Urlaubs-Schlagwörter (Komma-getrennt)", s.vacation_keywords, "urlaub, feiertag")}
-        </div>
-      </fieldset>`;
-  }
-
-  _fieldsetGeraete(s) {
-    return `
-      <fieldset class="fieldset">
-        <legend>Geräte &amp; Benachrichtigung</legend>
-        <div class="fields">
-          ${this._entityField("alarm_lights", "Weck-Lichter", s.alarm_lights, { multi: true })}
-          ${this._entityField("vacation_calendars", "Externe Urlaubskalender", s.vacation_calendars, { multi: true })}
-          ${this._fieldText("notifier", "Benachrichtigungsdienst", s.notifier, "notify.mobile_app_…")}
-        </div>
-      </fieldset>`;
-  }
-
-  _fieldsetAlexa(s) {
-    return `
-      <fieldset class="fieldset">
-        <legend>Alexa (Echo-Wecker)</legend>
-        <div class="fields">
-          ${this._fieldSwitch("alexa_enabled", "Echten Wecker auf dem Echo stellen", s.alexa_enabled)}
-          ${this._entityField("alexa_media_player", "Echo", s.alexa_media_player)}
-          ${this._entityField("alexa_text_helper", "Helfer: gesetzter Wecker", s.alexa_text_helper)}
-          ${this._entityField("alexa_enabled_boolean", "Helfer: Wecker aktiv", s.alexa_enabled_boolean)}
-          ${this._fieldNumber("pre_alarm_minutes", "Vorab-Wecker Echo", s.pre_alarm_minutes, 0, 30, 1, "min")}
-          ${this._fieldText("stop_word", "Stopp-Wort (Name des Echo-Weckers)", s.stop_word, "Wecker aus")}
-        </div>
-      </fieldset>`;
-  }
-
-  _wire() {
-    this._wireSettingsFields();
-    this._wireEntityFields();
-    this._wireTabs();
-
-    const save = this.shadowRoot.querySelector("#save-settings");
-    if (save) save.onclick = () =>
-      this._action({ action: "save_settings", settings: this._settings });
-  }
-}
-
 const STYLES = `
   :host { display: block; background: var(--primary-background-color, #f4f5f7); min-height: 100vh; }
   .wrap { max-width: 1100px; margin: 0 auto; padding: 16px; font-family: "Amazon Ember", var(--paper-font-body1_-_font-family, -apple-system, "Segoe UI", Roboto, sans-serif); color: var(--primary-text-color, #212121); }
-  .hero { border-radius: 18px; padding: 22px; color: #fff; background: linear-gradient(135deg, ${DAC_NAVY} 0%, #37475a 100%); box-shadow: 0 8px 26px rgba(0,0,0,.22); }
+  .nav { border-radius: 18px; padding: 14px 18px; color: #fff; background: linear-gradient(135deg, ${DAC_NAVY} 0%, #37475a 100%); box-shadow: 0 8px 26px rgba(0,0,0,.22); }
+  .nav-top { display: flex; justify-content: space-between; align-items: baseline; }
+  .nav-sub { opacity: .8; font-size: 13px; }
+  .nav-pages { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+  .page { background: rgba(255,255,255,.14); color: #fff; border: none; border-radius: 10px; padding: 9px 14px; cursor: pointer; font-size: 14px; }
+  .page:hover { background: rgba(255,255,255,.26); }
+  .page.on { background: ${DAC_AMBER}; color: #111; font-weight: 700; }
+  .hero { border-radius: 18px; padding: 22px; color: #fff; margin-top: 16px; background: linear-gradient(135deg, ${DAC_NAVY} 0%, #37475a 100%); box-shadow: 0 8px 26px rgba(0,0,0,.22); }
   .tone-ringing { background: linear-gradient(135deg, #b12704, ${DAC_AMBER}); animation: pulse 1.2s infinite; }
   .tone-scheduled { background: linear-gradient(135deg, #146eb4, ${DAC_NAVY}); }
   .tone-test { background: linear-gradient(135deg, #0f7b6c, ${DAC_NAVY}); }
   .tone-vacation { background: linear-gradient(135deg, #0f7b6c, ${DAC_NAVY}); }
   .tone-dismissed, .tone-stopped { background: linear-gradient(135deg, #4a5568, ${DAC_NAVY}); }
-  .tone-settings { background: linear-gradient(135deg, #37475a, ${DAC_NAVY}); }
   @keyframes pulse { 50% { filter: brightness(1.22); } }
   .hero-top { display: flex; justify-content: space-between; align-items: center; }
   .brand { font-weight: 800; letter-spacing: 2px; }
   .pill { background: rgba(255,255,255,.18); padding: 3px 12px; border-radius: 999px; font-size: 12px; }
-  .pill.link { color: #fff; text-decoration: none; }
-  .pill.link:hover { background: rgba(255,255,255,.3); }
   .clock { font-size: 54px; font-weight: 200; margin: 8px 0 0; font-variant-numeric: tabular-nums; }
   .status { opacity: .92; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: ${DAC_AMBER}; box-shadow: 0 0 0 4px rgba(255,153,0,.25); }
@@ -786,7 +990,7 @@ const STYLES = `
   .target { opacity: .68; font-size: 13px; margin-top: 2px; }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-top: 16px; }
   .card { background: var(--card-background-color, #fff); border-radius: 16px; padding: 16px 18px; box-shadow: 0 2px 10px rgba(0,0,0,.08); }
-  .card.wide { grid-column: 1 / -1; margin-top: 16px; }
+  .card.wide { margin-top: 16px; }
   .card.test-on { outline: 2px solid #0f7b6c; }
   h3 { margin: 0 0 6px; font-size: 16px; }
   h4 { margin: 12px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .5px; opacity: .6; }
@@ -803,15 +1007,22 @@ const STYLES = `
   .btn.danger { background: #b12704; color: #fff; }
   .btn.tiny { padding: 3px 9px; font-size: 12px; }
   .btn.stop { background: #fff; color: #b12704; font-size: 16px; padding: 13px 22px; margin-top: 14px; width: 100%; }
+  .linklike { background: none; border: none; color: #146eb4; cursor: pointer; padding: 0; font: inherit; text-decoration: underline; }
   .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
   .chip { background: var(--secondary-background-color, #eef1f5); border: 1px solid var(--divider-color, rgba(0,0,0,.1)); border-radius: 999px; padding: 6px 12px; cursor: pointer; font-size: 13px; color: inherit; }
-  .suggestions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; min-height: 8px; }
+  .suggestions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; min-height: 8px; }
   .chip.suggest { text-align: left; }
+  .chip.suggest.alexa { border-color: #146eb4; background: rgba(20,110,180,.1); }
   .chip.suggest em { display: block; font-style: normal; opacity: .55; font-size: 11px; }
+  .extra-label { width: 100%; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; opacity: .5; margin-top: 4px; }
+  .chosen-row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chosen { background: ${DAC_NAVY}; color: #fff; border: none; border-radius: 999px; padding: 5px 11px; font-size: 12px; cursor: pointer; }
+  .chosen b { opacity: .7; margin-left: 4px; }
   .seg { display: flex; gap: 6px; background: var(--secondary-background-color, #eef1f5); border-radius: 12px; padding: 4px; }
   .segbtn { flex: 1; border: none; background: transparent; border-radius: 9px; padding: 9px; cursor: pointer; font-weight: 600; color: inherit; }
   .segbtn.on { background: ${DAC_AMBER}; color: #111; }
-  .kv { display: flex; justify-content: space-between; padding: 5px 0; font-size: 14px; border-bottom: 1px solid var(--divider-color, rgba(0,0,0,.07)); }
+  .kv { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; font-size: 14px; border-bottom: 1px solid var(--divider-color, rgba(0,0,0,.07)); }
+  .kv b { text-align: right; font-weight: 600; }
   .fieldsets { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-top: 8px; }
   .fieldset { border: 1px solid var(--divider-color, rgba(0,0,0,.1)); border-radius: 14px; padding: 10px 14px 14px; margin: 0; }
   .fieldset legend { font-size: 12px; text-transform: uppercase; letter-spacing: .6px; opacity: .65; padding: 0 6px; }
@@ -821,7 +1032,7 @@ const STYLES = `
   .inp, .field input[type=text], .field input[type=number], .field input[type=time], .field select { background: var(--secondary-background-color, #eef1f5); border: 1px solid var(--divider-color, rgba(0,0,0,.12)); border-radius: 10px; padding: 9px 11px; font-size: 14px; color: inherit; width: 100%; box-sizing: border-box; }
   .inp.time { width: auto; font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .inp.small { width: 90px; }
-  .entity-field .suggest-input { border-style: dashed; }
+  .entity-field .search { border-color: #146eb4; }
   .switch { display: flex; align-items: center; gap: 10px; font-size: 14px; padding: 6px 0; grid-column: 1 / -1; }
   .switch input { width: 20px; height: 20px; }
   .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
@@ -831,28 +1042,36 @@ const STYLES = `
   .cell.empty { background: transparent; border: none; cursor: default; }
   .cell.own { background: ${DAC_AMBER}; color: #111; font-weight: 700; }
   .cell.ext { background: #146eb4; color: #fff; }
+  .cell.home { outline: 2px solid #0f7b6c; }
   .cell.sel { outline: 3px solid #146eb4; }
   .cell.today { box-shadow: inset 0 0 0 2px ${DAC_NAVY}; }
   .legend { display: flex; gap: 14px; flex-wrap: wrap; margin: 10px 0; font-size: 12px; color: var(--secondary-text-color, #6b7280); }
   .legend .dot { width: 10px; height: 10px; border-radius: 3px; box-shadow: none; display: inline-block; margin-right: 5px; }
   .legend .dot.own { background: ${DAC_AMBER}; }
   .legend .dot.ext { background: #146eb4; }
+  .legend .dot.home { background: #0f7b6c; }
   .legend .dot.sel { background: transparent; outline: 2px solid #146eb4; }
   .lists { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-top: 8px; }
+  .events { display: flex; flex-direction: column; }
   .item { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 5px 0; font-size: 13px; border-bottom: 1px solid var(--divider-color, rgba(0,0,0,.06)); }
-  .tabs { display: flex; gap: 6px; margin-top: 16px; }
+  .item .muted { margin: 0; }
+  .tag { font-size: 11px; background: var(--secondary-background-color, #eef1f5); border-radius: 999px; padding: 2px 9px; }
+  .tag.own { background: ${DAC_AMBER}; color: #111; }
+  .tag.vac { background: #146eb4; color: #fff; }
+  .entries { display: flex; gap: 6px; margin-top: 16px; }
   .tab { background: var(--secondary-background-color, #eef1f5); border: none; border-radius: 9px; padding: 8px 14px; cursor: pointer; color: inherit; }
   .tab.on { background: ${DAC_AMBER}; color: #111; font-weight: 700; }
+  .steps { margin: 0; padding-left: 18px; line-height: 1.7; font-size: 14px; }
+  .steps p { margin: 4px 0; }
+  code { background: var(--secondary-background-color, #eef1f5); border-radius: 5px; padding: 1px 5px; font-size: 12px; }
   .banner.error { background: #b12704; color: #fff; padding: 14px 16px; border-radius: 12px; }
   .empty { background: var(--card-background-color, #fff); border-radius: 16px; padding: 40px; text-align: center; }
-  .foot { text-align: center; color: var(--secondary-text-color, #6b7280); font-size: 12px; margin: 20px 0; }
+  .toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(20px); background: ${DAC_NAVY}; color: #fff; padding: 11px 20px; border-radius: 999px; font-size: 13px; opacity: 0; pointer-events: none; transition: all .25s ease; box-shadow: 0 8px 22px rgba(0,0,0,.3); }
+  .toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
 `;
 
 if (!customElements.get("dac-panel")) {
   customElements.define("dac-panel", DacPanel);
-}
-if (!customElements.get("dac-settings-panel")) {
-  customElements.define("dac-settings-panel", DacSettingsPanel);
 }
 
 if (window.console && window.console.info) {

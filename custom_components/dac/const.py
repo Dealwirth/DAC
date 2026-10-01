@@ -107,16 +107,13 @@ ALEXA_ROUTINE_NAME: Final = "DAC Stopp"
 SERVICE_SET_ALEXA_ALARM: Final = "set_alexa_alarm"
 SERVICE_CLEAR_ALEXA_ALARM: Final = "clear_alexa_alarm"
 
-# --- Sidebar panels ---------------------------------------------------------
+# --- Sidebar panel ----------------------------------------------------------
+# Ein einziger Sidebar-Eintrag „DAC“; die früheren Seiten (Steuerung,
+# Einstellungen, Kalender, Hilfe) sind jetzt Tabs innerhalb dieses Dashboards.
 PANEL_URL_PATH: Final = "dac"
 PANEL_ELEMENT: Final = "dac-panel"
 PANEL_MODULE_PATH: Final = "/dac/static/dac-panel.js"
 PANEL_TITLE: Final = "DAC"
-
-# The settings live on their own page (separate sidebar entry).
-PANEL_SETTINGS_URL_PATH: Final = "dac-settings"
-PANEL_SETTINGS_ELEMENT: Final = "dac-settings-panel"
-PANEL_SETTINGS_TITLE: Final = "DAC Einstellungen"
 
 # Entity search: the API offers every entity as one flat searchable list; the
 # panel filters it per field by domain. Only noisy/internal domains are skipped.
