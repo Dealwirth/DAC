@@ -6,24 +6,28 @@ Repo: https://github.com/Dealwirth/DAC
 
 ## Umgebung
 - Python 3.13, Home Assistant 2026.2.3 (Test-Matrix in `.github/workflows/ci.yml`).
-- Tests: `python -m pytest tests -q` (109 Tests). Konfiguration in `pytest.ini`.
+- Tests: `python -m pytest tests -q` (116 Tests). Konfiguration in `pytest.ini`.
 - Lint: `python -m ruff check custom_components tests`.
 - JS-Syntaxcheck: `node --check custom_components/dac/www/dac-panel.js`.
 
 ## Architektur (wichtig)
-- **Konfiguration liegt komplett in den Sidebar-Panels** (`www/dac-panel.js`,
-  registriert in `frontend.py` über `panel_custom`): Steuerungsseite `/dac`
-  (`<dac-panel>`) und Einstellungsseite `/dac-settings` (`<dac-settings-panel>`,
-  eigenes Sidebar-Icon). Der Config-Flow stellt keine Fragen und legt nur einen
-  Entry mit `default_options()` an.
+- **Konfiguration liegt komplett im DAC-Dashboard** (`www/dac-panel.js`,
+  registriert in `frontend.py` über `panel_custom`): **ein** Sidebar-Eintrag
+  `/dac` (`<dac-panel>`) mit vier Seiten – Home, Kalender, Einstellungen, Hilfe
+  (interne Navigation über `_page` / `data-page`). Der Config-Flow stellt keine
+  Fragen und legt nur einen Entry mit `default_options()` an.
 - `settings.py` ist die Single Source of Truth für Optionen: `default_options()`,
   `EDITABLE_KEYS`, `coerce_options()`, `build_settings_schema()`, `vacation_keywords()`.
   Neue Optionen immer hier ergänzen (plus `translations/{en,de}.json` und Panel-JS).
-- `http_api.py` (`DacApiView`, `/api/dac`) ist die API beider Panels (GET=Zustand,
-  POST=Aktionen). `entries[].entities` ist EINE flache Liste (`{id, name, domain}`)
-  über `ENTITY_SEARCH_DOMAINS`; das Panel filtert lokal nach Domain + Suchtext
-  (`FIELD_DOMAINS` / `matchesEntity` in `dac-panel.js`). Urlaubstage liegen als
-  Ganztages-Events im `calendar.py`-Store.
+- `http_api.py` (`DacApiView`, `/api/dac`) ist die API des Dashboards (GET=Zustand,
+  POST=Aktionen). `entries[].entities` ist EINE flache Liste
+  (`{id, name, domain, area, alexa}`) über `ENTITY_SEARCH_EXCLUDE_DOMAINS`; das
+  Panel filtert lokal über `searchEntities()` (`FIELD_DOMAINS` in `dac-panel.js`)
+  nach Name, Entity-ID und Area – Domain-Treffer zuerst, andere unter „auch gefunden".
+  Zusätzlich: `entries[].calendars` (alle HA-Kalender + Rolle) und
+  `entries[].calendar.home_calendars` (echte Termine via `calendar.get_events`).
+  Urlaubstage liegen als Ganztages-Events im `calendar.py`-Store;
+  `import_vacation` übernimmt einen HA-Kalendertag in den DAC-Kalender.
 - `coordinator.py` liest Optionen aus **`entry.data` UND `entry.options`** (gemerged) –
   beide Speicherwege (Panel und Options-Flow) müssen identisch funktionieren.
 - `logic.py` ist HA-frei und unit-testbar; `alexa.py` kapselt die Echo-Wecker

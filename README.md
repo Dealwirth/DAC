@@ -1,6 +1,6 @@
 # DAC – Dynamic Alarm Clock ⏰
 
-**Ein dynamisches Wecksystem für Home Assistant – als vollwertige HACS-Integration mit zwei Seitenleisten-Seiten (Steuerung + Einstellungen), durchsuchbarer Entitäten-Auswahl und optionalen echten Echo-Alexa-Weckern.**
+**Ein dynamisches Wecksystem für Home Assistant – als vollwertige HACS-Integration mit einem Dashboard (Home, Kalender, Einstellungen, Hilfe), durchsuchbarer Entitäten-Auswahl und optionalen echten Echo-Alexa-Weckern.**
 
 DAC berechnet deine Weckzeit automatisch aus dem Arbeitsbeginn (z. B. per NFC-Tag gescannt),
 weckt dich mit Licht und einem echten Wecker auf dem Echo im einstellbaren Intervall
@@ -18,13 +18,14 @@ und erinnert dich abends, wenn du vergessen hast, deine Arbeitszeit zu setzen.
 | **Fallback-Weckzeit** | Wurde nichts gesetzt, greift eine konfigurierbare Standard-Weckzeit (z. B. 06:00) – mit intelligenter Cutoff-Logik |
 | **Urlaub & Feiertage** | Täglicher Scan (00:01) gegen einen eigenen Urlaubskalender und/oder externe Kalender; Keywords wie *Urlaub, Feiertag, Ferien, vacation, holiday* |
 | **Reminder** | Tägliche Erinnerung (z. B. 20:30) via frei wählbarem `notify.*`-Dienst, wenn für morgen noch keine Arbeitszeit gesetzt wurde |
-| **Zwei Panel-Seiten** | „DAC“ (`/dac`) für die Steuerung, „DAC Einstellungen“ (`/dac-settings`) für alle Optionen – kein Einrichtungsassistent nötig |
+| **Ein Dashboard, mehrere Seiten** | Ein Sidebar-Eintrag „DAC“ (`/dac`) mit den Seiten **Home**, **Kalender**, **Einstellungen** und **Hilfe** – kein Einrichtungsassistent nötig |
 | **Einfache Zeitwahl** | Native Zeitauswahl (`<input type="time">`) plus Schnellwahl-Chips – kein Zifferblatt-Rad, kein manuelles Tippen von `HH:MM` |
 | **Echter Monatskalender** | Urlaubstage bequem im Monatsraster markieren (Einzel- und Bereichsauswahl per Shift-Klick), eigene und erkannte Tage auf einen Blick |
+| **Kalender-Kopplung** | Die Kalender-Seite zeigt alle Home-Assistant-Kalender und deren Termine; ein Termin lässt sich mit einem Klick als DAC-Urlaubstag übernehmen |
 | **Alexa-Geräte-Wecker** | Optional: echter Wecker auf dem Echo – Textbefehl mit „morgens"/„abends" (keine Rückfragen), gezieltes Löschen nur des DAC-eigenen Weckers, Vorab-Wecker im Weck-Loop |
 | **Keine Ansagen** | DAC spielt **kein TTS** ab: Der Echo klingelt über seinen eigenen Wecker, Home Assistant schaltet nur das Licht – wie in der klassischen YAML-Automation |
-| **Entitäten-Suche** | Jedes Entitätsfeld hat ein Suchfeld mit Live-Vorschlägen über **alle** Entitäten (Sensoren, Lichter, Echo-Player, Helfer …) – Tippen filtert, Klick übernimmt |
-| **Testmodus** | Direkt in die Steuerungsseite integriert: einmaliger Testwecker in X Minuten – gleiche Kette (Licht, Echo, Wiederholung), gleicher Stopp |
+| **Live-Entitäten-Suche** | Jedes Entitätsfeld **ist** ein Suchfeld: Tippen filtert sofort über Name, Entity-ID und **Bereich (Area)** – passende Domains zuerst, „auch gefunden" danach. So findest du deinen Echo, ohne den genauen Namen zu kennen |
+| **Testmodus** | Direkt in die Home-Seite integriert: einmaliger Testwecker in X Minuten – gleiche Kette (Licht, Echo, Wiederholung), gleicher Stopp |
 | **Stopp per Sprache** | Über eine Alexa-Routine („Wecker mit dem Namen *Wecker aus* klingelt“ → `dac.stop_alarm`) lässt sich der Wecker auch per Echo beenden |
 | **Restpersistenz** | Wecker-Zustand überlebt Neustarts; ein Wecker, der während des Klingelns „verpasst" wurde, resumed |
 | **Alles per UI** | Der Einrichtungsassistent fragt nichts ab; alle Optionen werden auf der Einstellungsseite gespeichert (Options-Flow bleibt als HA-nativer Fallback) |
@@ -42,29 +43,48 @@ und erinnert dich abends, wenn du vergessen hast, deine Arbeitszeit zu setzen.
 
 `custom_components/dac/` aus diesem Repo nach `<config>/custom_components/dac/` kopieren und HA neu starten.
 
-## 🧭 Die DAC-Seiten (Seitenleiste)
+## 🧭 Das DAC-Dashboard (Seitenleiste)
 
-Nach der Einrichtung erscheinen **zwei** Einträge in der Seitenleiste:
+Nach der Einrichtung erscheint **ein** Eintrag in der Seitenleiste: **„DAC“** (`/dac`).
+Oben wechselst du zwischen vier Seiten:
 
-### „DAC“ (`/dac`) – Steuerung
+### 🏠 Home – Steuerung
 
 - Große Uhr + Countdown bis zum Wecker
 - **Arbeitsbeginn** per nativer Zeitauswahl oder Schnellwahl-Chips setzen/zurücksetzen
 - **Testmodus**: Testwecker in X Minuten starten/abbrechen – gleiche Kette wie der echte Wecker
 - Modus: **Standard** / **Heute aus** / **Urlaub**
 - **Alexa**: Wecker stellen/synchronisieren/löschen inkl. Live-Status des Echos und Stopp-Wort
-- **Urlaubskalender**: Monatsraster mit eigener und externer Urlaubserkennung
 
-### „DAC Einstellungen“ (`/dac-settings`) – alle Optionen
+### 📅 Kalender – Urlaub & HA-Kopplung
+
+- **Urlaubskalender**: Monatsraster mit eigener und externer Urlaubserkennung;
+  Tage anklicken (Shift-Klick für einen Bereich) und mit einem Namen speichern
+- **Home-Assistant-Kalender**: Liste aller Kalender mit ihrer Rolle
+  (DAC-Urlaub / Urlaub-Feiertag) und die **echten Termine** aus den gekoppelten
+  Kalendern. Jeder Termin lässt sich mit einem Klick **als DAC-Urlaubstag übernehmen** –
+  so ist der DAC-Kalender mit deinen HA-Kalendern gekoppelt.
+
+### ⚙️ Einstellungen – alle Optionen
 
 - Drei aufgeräumte Gruppen (Zeiten & Weckzyklus, Geräte & Benachrichtigung, Alexa)
-- **Entitäten-Suche**: Jedes Feld hat ein Suchfeld mit Live-Vorschlägen –
-  über alle passenden Entitäten (Sensoren, Lichter, Echo-Player, Helfer …).
-  Tippen filtert nach Name oder Entity-ID, ein Klick auf den Vorschlag übernimmt ihn.
+- **Live-Entitäten-Suche**: Jedes Feld **ist** ein Suchfeld. Tippen filtert sofort
+  über **Name, Entity-ID und Bereich (Area)**; Treffer aus den passenden Domains
+  stehen zuerst, andere Domains erscheinen unter „auch gefunden". Echo-Player sind
+  mit 🔊 markiert. So findest du z. B. deinen Echo über „Echo" oder „Küche",
+  ohne den genauen Entity-Namen zu kennen.
+- Gewählte Einträge erscheinen als Chips über dem Feld und lassen sich dort
+  mit einem Klick wieder entfernen.
 - Ein Button speichert alles.
 
+### ❓ Hilfe – Einrichtung & Dienste
+
+- Kurzanleitung in fünf Schritten
+- **Alexa einrichten** ohne den genauen Namen zu kennen (Schritt für Schritt)
+- Übersicht aller `dac.*`-Dienste
+
 > Der Einrichtungsassistent fragt **nichts** ab: Integration hinzufügen genügt,
-> danach alles auf der Einstellungsseite einstellen. Für Puristen bleibt der
+> danach alles im Dashboard einstellen. Für Puristen bleibt der
 > klassische Options-Flow (Geräte & Dienste → DAC → Konfigurieren) erhalten.
 
 ### 🎨 Design
@@ -76,7 +96,7 @@ rot-orange pulsierend beim Klingeln, grün im Urlaub, grau bei deaktiviert/gesto
 
 ## ⚙️ Konfiguration
 
-Alle Optionen werden auf der Seite **DAC Einstellungen** (`/dac-settings`)
+Alle Optionen werden auf der Seite **Einstellungen** im DAC-Dashboard (`/dac`)
 gespeichert; der klassische Options-Flow (Geräte & Dienste → DAC → Konfigurieren)
 bietet dieselben Felder.
 
@@ -243,14 +263,16 @@ py -m venv .venv
 .venv/Scripts/python -m pytest tests -v
 ```
 
-109 Tests decken die komplette Weck-Logik ab: Offset-Berechnung, Mitternachts-Wrap,
+116 Tests decken die komplette Weck-Logik ab: Offset-Berechnung, Mitternachts-Wrap,
 Fallback-/Cutoff-Semantik inkl. Oversleep-Schutz, Weck-Loop mit einstellbarem
 Intervall, Testmodus (Armen/Klingeln/Abbruch/Stopp), Dismiss, Vacation-Check,
 Reminder, Persistenz, Alexa-Bridge (morgens/abends, echter Geräte-Wecker ohne TTS,
 gezieltes Löschen, Vorab-Wecker, Gate-Steuerung, Stopp-Wort), Options-Schema und
 -Normalisierung, HTTP-API (Panel-Aktionen inkl. Testmodus, durchsuchbare
-Entitäts-Liste, Urlaubs-CRUD), Registrierung beider Panel-Seiten,
-Config-/Options-Flow und Service-Registrierung.
+Entitäts-Liste mit Bereich/Echo-Markierung, Kalender-Liste und -Import,
+Urlaubs-CRUD), Registrierung des Dashboards, Panel-JS (Seiten, Live-Suche –
+die Suchfunktion wird direkt in Node ausgeführt), Config-/Options-Flow und
+Service-Registrierung.
 
 ## 📄 Lizenz
 
