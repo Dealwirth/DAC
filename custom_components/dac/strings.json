@@ -31,7 +31,10 @@
           "pre_alarm_minutes": "Pre-alarm on the Echo: minutes before the wake-up time",
           "vacation_keywords": "Vacation keywords (comma separated)",
           "wake_text": "Wake announcement text",
-          "alexa_command_type": "Alexa command type (custom = text command, tts = spoken)"
+          "alexa_command_type": "Alexa command type (custom = text command, tts = spoken)",
+          "loop_interval_minutes": "Wake loop: repeat every N minutes while ringing (1-60)",
+          "test_mode_minutes": "Test alarm: ring after N minutes",
+          "stop_word": "Stop word (name of the Echo alarm, used by the Alexa stop routine)"
         }
       }
     }
@@ -70,7 +73,7 @@
     },
     "stop_alarm": {
       "name": "Stop alarm",
-      "description": "Stops the running alarm loop."
+      "description": "Stops the running alarm loop and the Echo alarm. This is also the service the Alexa routine \"DAC Stopp\" calls so the alarm can be stopped by voice."
     },
     "dismiss_for_today": {
       "name": "Dismiss for today",
@@ -83,6 +86,14 @@
     "clear_alexa_alarm": {
       "name": "Clear Alexa alarm (DAC's own only)",
       "description": "Deletes exactly the Echo alarm set by DAC – manually created Alexa alarms stay untouched."
+    },
+    "start_test_alarm": {
+      "name": "Start test alarm",
+      "description": "Rings once after N minutes (default from the settings) using the full wake chain (lights, players, Echo pre-alarm, gate). Stop it with stop_alarm, the panel button or the Alexa stop word."
+    },
+    "cancel_test_alarm": {
+      "name": "Cancel test alarm",
+      "description": "Cancels a test alarm that has not started ringing yet."
     }
   }
 }

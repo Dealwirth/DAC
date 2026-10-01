@@ -6,8 +6,8 @@ Repo: https://github.com/Dealwirth/DAC
 
 ## Umgebung
 - Python 3.13, Home Assistant 2026.2.3 (Test-Matrix in `.github/workflows/ci.yml`).
-- Tests: `python -m pytest tests -q` (83 Tests). Konfiguration in `pytest.ini`.
-- Lint: `python -m pyflakes custom_components/dac/*.py tests/*.py`.
+- Tests: `python -m pytest tests -q` (109 Tests). Konfiguration in `pytest.ini`.
+- Lint: `python -m ruff check custom_components tests`.
 - JS-Syntaxcheck: `node --check custom_components/dac/www/dac-panel.js`.
 
 ## Architektur (wichtig)
@@ -25,7 +25,19 @@ Repo: https://github.com/Dealwirth/DAC
   (Textbefehl mit Befehlstyp `custom`/`tts`, gezieltes Löschen nur des eigenen
   Weckers, Gate-Steuerung `input_boolean.wecker_aktiv`, Vorab-Wecker im Loop).
   Das Gate setzt DAC selbst (an beim Planen/Klingeln, aus beim Stoppen) – es ist
-  ein Sicherheitsnetz, keine Voraussetzung.
+  ein Sicherheitsnetz, keine Voraussetzung. Echo-Wecker werden mit dem
+  konfigurierbaren Stopp-Wort (`CONF_STOP_WORD`) benannt; die Alexa-Routine
+  „DAC Stopp" (Auslöser: Wecker mit diesem Namen klingelt) ruft `dac.stop_alarm`
+  auf – so lässt sich der Wecker per Sprache stoppen (kein Custom-Skill nötig).
+- **Testmodus**: `async_start_test_alarm` / `async_cancel_test_alarm` armen einen
+  Einmal-Wecker (`_test_target`) relativ zur aktuellen Zeit; er nutzt dieselbe
+  Weck-Kette wie der echte Wecker und wird über `dac.stop_alarm` beendet. Ein
+  gestoppter Testwecker darf den echten Wecker des Tages NICHT verbrauchen
+  (nicht in `_stopped_days` eintragen).
+- **Weck-Intervall**: `coordinator.loop_interval_minutes` (Option
+  `CONF_LOOP_INTERVAL_MINUTES`, 1–60, Standard 5) steuert die Wiederholung bis
+  zum Stopp. `http_api.py` liefert dem Panel zusätzlich `entities`
+  (Datalist-Vorschläge je Option, Mapping `ENTITY_GROUPS` im Panel-JS).
 
 ## Konventionen
 - Kein Dauer-Polling im Panel: der Server ist Single Source of Truth, nach jeder

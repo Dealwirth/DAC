@@ -30,19 +30,23 @@ from .const import (
     CONF_ALARM_LIGHTS,
     CONF_ALARM_VOLUME,
     CONF_DEFAULT_ALARM_TIME,
+    CONF_LOOP_INTERVAL_MINUTES,
     CONF_MEDIA_PLAYERS,
     CONF_NOTIFIER,
     CONF_OFFSET,
     CONF_REMINDER_TEXT,
     CONF_REMINDER_TIME,
+    CONF_TEST_MODE_MINUTES,
     CONF_VACATION_CALENDARS,
     CONF_WAKE_TEXT,
     DEFAULT_ALARM_VOLUME,
-    DEFAULT_LOOP_INTERVAL,
+    DEFAULT_LOOP_INTERVAL_MINUTES,
     DEFAULT_REMINDER_TEXT,
     DEFAULT_VACATION_SCAN_TIME,
     DEFAULT_WAKE_TEXT,
     DOMAIN,
+    MAX_LOOP_INTERVAL_MINUTES,
+    MIN_LOOP_INTERVAL_MINUTES,
     MODE_DISMISSED,
     MODE_STANDARD,
     MODE_VACATION,
@@ -101,6 +105,7 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._dismissed_days: set[date] = set()
         self._stopped_days: set[date] = set()
         self._vacation_override_day: date | None = None
+        self._test_target: datetime | None = None
         self._loop_unsub: Callable[[], None] | None = None
         self._ringing_jobs: list[Callable[[], None]] = []
         self.alexa = AlexaBridge(hass, self)
@@ -150,6 +155,9 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "mode": self.current_mode,
             "offset_minutes": self.offset_minutes,
             "default_alarm_time": self.default_alarm_time.strftime("%H:%M:%S"),
+            "test_mode": self.test_mode_active,
+            "test_target": self._test_target.isoformat() if self._test_target else None,
+            "loop_interval_minutes": self.loop_interval_minutes,
         }
 
     async def _async_update_data(self) -> dict[str, Any]:
@@ -174,6 +182,20 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return int(self._options.get(CONF_OFFSET, 60))
         except (TypeError, ValueError):
             return 60
+
+    @property
+    def loop_interval_minutes(self) -> int:
+        """How often the ringing alarm repeats (1..60 minutes)."""
+        try:
+            value = int(self._options.get(CONF_LOOP_INTERVAL_MINUTES, DEFAULT_LOOP_INTERVAL_MINUTES))
+        except (TypeError, ValueError):
+            value = DEFAULT_LOOP_INTERVAL_MINUTES
+        return max(MIN_LOOP_INTERVAL_MINUTES, min(MAX_LOOP_INTERVAL_MINUTES, value))
+
+    @property
+    def test_mode_active(self) -> bool:
+        """True while a test alarm is pending or ringing."""
+        return self._test_target is not None
 
     def _notif_message(self) -> str:
         template = self._options.get(CONF_REMINDER_TEXT) or DEFAULT_REMINDER_TEXT
@@ -218,11 +240,61 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._reschedule_alarm()
         self.async_update_listeners()
 
+    async def async_start_test_alarm(self, call: ServiceCall | Any) -> None:
+        """Ring a one-off test alarm in N minutes (default from the options).
+
+        The test alarm uses the exact same ringing loop as the real alarm
+        (lights, players, Echo pre-alarm, Alexa gate) so the whole chain can be
+        verified – and it is stopped exactly like the real one (dac.stop_alarm,
+        the panel button, or the configured Alexa stop word).
+        """
+        minutes = call.data.get("minutes") if hasattr(call, "data") else None
+        try:
+            minutes_int = max(1, int(minutes if minutes is not None else self._test_minutes))
+        except (TypeError, ValueError):
+            minutes_int = self._test_minutes
+
+        await self._async_stop_loop()
+        self._test_target = dt_util.now() + timedelta(minutes=minutes_int)
+        self._set_state(STATE_SCHEDULED)
+        self._ringing_jobs.append(
+            async_track_point_in_time(self.hass, self._alarm_fired, self._test_target)
+        )
+        _LOGGER.info("DAC test alarm armed for %s (%s min)", self._test_target, minutes_int)
+        self.async_update_listeners()
+        await self.async_save_state()
+
+    async def async_cancel_test_alarm(self, call: ServiceCall | Any) -> None:
+        """Cancel a pending test alarm (no effect once it rings)."""
+        if self._test_target is None:
+            return
+        for job in self._ringing_jobs:
+            job()
+        self._ringing_jobs = []
+        self._test_target = None
+        if self._state == STATE_SCHEDULED:
+            self._set_state(STATE_IDLE)
+        self._reschedule_alarm()
+        self.async_update_listeners()
+        await self.async_save_state()
+
+    @property
+    def _test_minutes(self) -> int:
+        try:
+            value = int(self._options.get(CONF_TEST_MODE_MINUTES, 1))
+        except (TypeError, ValueError):
+            value = 1
+        return max(1, value)
+
     async def async_stop_alarm(self, call: ServiceCall) -> None:
         """Stop the looping alarm now."""
         was_ringing = self._state == STATE_RINGING
+        was_test = self._test_target is not None
+        self._test_target = None
         if was_ringing:
-            self._stopped_days.add(dt_util.now().date())
+            # A stopped test alarm must not consume today's real work time.
+            if not was_test:
+                self._stopped_days.add(dt_util.now().date())
             await self._async_stop_loop(set_state=STATE_STOPPED)
         else:
             await self._async_stop_loop()
@@ -356,10 +428,7 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._set_state(STATE_RINGING)
             self.async_update_listeners()
             await self._async_fire_once()
-            if self._state == STATE_RINGING:
-                self._loop_unsub = async_track_time_interval(
-                    self.hass, self._loop_tick, DEFAULT_LOOP_INTERVAL
-                )
+            self._start_loop()
             return
         self._reschedule_alarm()
 
@@ -461,6 +530,11 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     @callback
     def _reschedule_alarm(self) -> None:
         """Compute the next alarm and (re)arm the point-in-time trigger."""
+        if self._test_target is not None:
+            # A test alarm owns the schedule; the real alarm must not steal it.
+            self.async_update_listeners()
+            return
+
         for job in self._ringing_jobs:
             job()
         self._ringing_jobs = []
@@ -545,7 +619,9 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _alarm_fired(self, now: datetime) -> None:
         """The alarm time has been reached – start the looping alarm."""
-        if self._is_vacation or self._alarm_day in self._dismissed_days:
+        if self._test_target is None and (
+            self._is_vacation or self._alarm_day in self._dismissed_days
+        ):
             self._set_state(STATE_VACATION if self._is_vacation else STATE_DISMISSED)
             return
         self._set_state(STATE_RINGING)
@@ -554,10 +630,15 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Echo pre-alarm keeps being placed even across restarts.
         await self.alexa.async_set_gate(True)
         await self._async_fire_once()
-        if self._state == STATE_RINGING:
-            self._loop_unsub = async_track_time_interval(
-                self.hass, self._loop_tick, DEFAULT_LOOP_INTERVAL
-            )
+        self._start_loop()
+
+    def _start_loop(self) -> None:
+        """(Re)start the repeating wake loop with the configured interval."""
+        if self._loop_unsub:
+            self._loop_unsub()
+        interval = timedelta(minutes=self.loop_interval_minutes)
+        self._loop_unsub = async_track_time_interval(self.hass, self._loop_tick, interval)
+        _LOGGER.debug("DAC wake loop started (every %s min)", self.loop_interval_minutes)
 
     async def _loop_tick(self, now: datetime) -> None:
         if self._state != STATE_RINGING:
@@ -629,6 +710,7 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         for job in self._ringing_jobs:
             job()
         self._ringing_jobs = []
+        self._test_target = None
         players = list(self._options.get(CONF_MEDIA_PLAYERS) or [])
         for player in players:
             try:

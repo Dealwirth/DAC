@@ -2,11 +2,16 @@
  * DAC – Dynamic Alarm Clock · Sidebar-Panel (dac-panel)
  *
  * Vollständige Verwaltung der Integration auf einer Seite: Wecker, Modus,
- * Alexa, Urlaubskalender und alle Einstellungen. Nutzt die DAC-HTTP-API über
- * hass.callApi("GET"|"POST", "dac") und das Design von Home Assistant gemischt
- * mit der Amazon-/Alexa-Farbwelt (Navy + Orange).
+ * Testmodus, Alexa, Urlaubskalender und alle Einstellungen. Nutzt die
+ * DAC-HTTP-API über hass.callApi("GET"|"POST", "dac") und das Design von
+ * Home Assistant gemischt mit der Amazon-/Alexa-Farbwelt (Navy + Orange).
+ *
+ * Zeitwahl: native <input type="time"> plus Schnellwahl-Chips – kein eigenes
+ * Zifferblatt-Rad mehr.
+ * Entitäten: pro Feld werden die vorhandenen Geräte als <datalist> und als
+ * anklickbare Vorschlags-Chips angeboten.
  */
-const DAC_VERSION = "0.4.0";
+const DAC_VERSION = "0.5.0";
 const DAC_AMBER = "#ff9900";
 const DAC_NAVY = "#232f3e";
 
@@ -15,6 +20,17 @@ const MONTHS = [
   "Januar", "Februar", "März", "April", "Mai", "Juni",
   "Juli", "August", "September", "Oktober", "November", "Dezember",
 ];
+
+// Welche Option gehört zu welcher Entity-Gruppe aus dem API-Payload?
+const ENTITY_GROUPS = {
+  alarm_lights: "lights",
+  media_players: "media_players",
+  vacation_calendars: "calendars",
+  notifier: "notifiers",
+  alexa_media_player: "media_players",
+  alexa_text_helper: "input_text",
+  alexa_enabled_boolean: "input_boolean",
+};
 
 function esc(value) {
   const div = document.createElement("div");
@@ -71,14 +87,17 @@ function modeLabel(mode) {
 }
 
 function statusOf(entry) {
-  if (entry.vacation) return { icon: "beach", label: "Urlaub / Feiertag", tone: "vacation" };
+  if (entry.vacation) return { label: "Urlaub / Feiertag", tone: "vacation" };
   switch (entry.state) {
-    case "ringing": return { icon: "alarm", label: "Weckt gerade", tone: "ringing" };
-    case "scheduled": return { icon: "check", label: "Wecker gestellt", tone: "scheduled" };
-    case "stopped": return { icon: "stop", label: "Gestoppt", tone: "stopped" };
-    case "dismissed": return { icon: "sleep", label: "Heute deaktiviert", tone: "dismissed" };
-    case "vacation": return { icon: "beach", label: "Urlaub / Feiertag", tone: "vacation" };
-    default: return { icon: "clock", label: "Warte auf Arbeitszeit", tone: "idle" };
+    case "ringing": return { label: "Weckt gerade", tone: "ringing" };
+    case "scheduled":
+      return entry.test_mode
+        ? { label: "Testwecker gestellt", tone: "test" }
+        : { label: "Wecker gestellt", tone: "scheduled" };
+    case "stopped": return { label: "Gestoppt", tone: "stopped" };
+    case "dismissed": return { label: "Heute deaktiviert", tone: "dismissed" };
+    case "vacation": return { label: "Urlaub / Feiertag", tone: "vacation" };
+    default: return { label: "Warte auf Arbeitszeit", tone: "idle" };
   }
 }
 
@@ -98,7 +117,6 @@ class DacPanel extends HTMLElement {
     this._entryIndex = 0;
     this._month = new Date();
     this._selected = new Set();
-    this._picker = null;
     this._settings = {};
     this._dirty = false;
     this._clock = null;
@@ -182,7 +200,6 @@ class DacPanel extends HTMLElement {
 
   // ----------------------------------------------------------------- render
   _render() {
-    if (this._picker) return; // never wipe an open dialog
     if (this._error) {
       this.shadowRoot.innerHTML = `<style>${STYLES}</style>
         <div class="wrap"><div class="banner error">⚠️ ${esc(this._error)}</div></div>`;
@@ -217,7 +234,7 @@ class DacPanel extends HTMLElement {
       <header class="hero tone-${status.tone}">
         <div class="hero-top">
           <span class="brand">⏰ DAC</span>
-          <span class="pill">${esc(modeLabel(entry.mode))}</span>
+          <span class="pill">${esc(modeLabel(entry.mode))}${entry.test_mode ? " · Test" : ""}</span>
         </div>
         <div class="clock">${clockNow()}</div>
         <div class="status"><span class="dot"></span>${esc(status.label)}</div>
@@ -230,112 +247,218 @@ class DacPanel extends HTMLElement {
       </header>
 
       <div class="grid">
-        <section class="card">
-          <h3>Arbeitsbeginn</h3>
-          <p class="muted">Weckzeit = Arbeitsbeginn − ${esc(entry.offset_minutes)} min</p>
-          <div class="row">
-            <button class="timebtn" id="pick-work">
-              <span class="timebtn-value">${hm(entry.work_time) || "--:--"}</span>
-              <span class="timebtn-hint">Arbeitsbeginn wählen</span>
-            </button>
-            <button class="btn" id="set-work">Setzen</button>
-            <button class="btn ghost" id="clear-work" title="Zurücksetzen">Zurücksetzen</button>
-          </div>
-          <div class="chips" id="work-chips">
-            ${["04:00", "05:00", "06:00", "07:00", "08:00", "09:00"].map((t) =>
-              `<button class="chip" data-work="${t}">${t}</button>`).join("")}
-          </div>
-          <p class="hint">${entry.work_time
-            ? `Gesetzt für ${esc(entry.work_time_day || "heute")}`
-            : `Fallback: ${hm(entry.default_alarm_time)} Uhr`}</p>
-        </section>
-
-        <section class="card">
-          <h3>Modus</h3>
-          <div class="seg">
-            ${["standard", "dismissed", "vacation"].map((m) =>
-              `<button class="segbtn ${entry.mode === m ? "on" : ""}" data-mode="${m}">${esc(modeLabel(m))}</button>`).join("")}
-          </div>
-          <p class="hint">„Urlaub“ überschreibt den Wecker für heute, „Heute aus“ deaktiviert ihn einmalig.</p>
-        </section>
-
-        <section class="card">
-          <h3>Alexa (Echo-Wecker)</h3>
-          <div class="kv"><span>Status</span><b>${alexa.enabled ? "aktiv" : "aus"}</b></div>
-          <div class="kv"><span>Echo</span><b>${esc(alexa.player || "—")}</b></div>
-          <div class="kv"><span>Gesetzter Wecker</span><b>${esc(alexa.stored_alarm || "keiner")}</b></div>
-          <div class="row">
-            <button class="btn" id="alexa-set">Wecker setzen</button>
-            <button class="btn ghost" id="alexa-sync">Sync</button>
-            <button class="btn danger" id="alexa-clear">Löschen</button>
-          </div>
-          ${alexa.enabled ? "" : `<p class="hint">Aktiviere Alexa unten in den Einstellungen und wähle deinen Echo.</p>`}
-        </section>
-
-        <section class="card">
-          <h3>Einstellungen</h3>
-          <div class="fields">
-            ${this._fieldTime("default_alarm_time", "Standard-Weckzeit (Fallback)", s.default_alarm_time)}
-            ${this._fieldNumber("offset_minutes", "Offset vor Arbeitsbeginn (min)", s.offset_minutes, 0, 600, 5)}
-            ${this._fieldTime("reminder_time", "Tägliche Erinnerung", s.reminder_time)}
-            ${this._fieldText("notifier", "Benachrichtigungsdienst", s.notifier, "notify.mobile_app_…")}
-            ${this._fieldText("alarm_lights", "Weck-Lichter (Komma-getrennt)", listToText(s.alarm_lights), "light.schlafzimmer")}
-            ${this._fieldText("media_players", "Weck-Lautsprecher (Komma-getrennt)", listToText(s.media_players), "media_player.echo")}
-            ${this._fieldText("vacation_calendars", "Externe Urlaubskalender", listToText(s.vacation_calendars), "calendar.feiertage")}
-            ${this._fieldNumber("alarm_volume", "Lautstärke (0–1)", s.alarm_volume, 0, 1, 0.05)}
-            ${this._fieldText("wake_text", "Weck-Ansage", s.wake_text, "Guten Morgen!")}
-            ${this._fieldText("vacation_keywords", "Urlaubs-Schlagwörter (Komma-getrennt)", s.vacation_keywords, "urlaub, feiertag")}
-            <label class="switch">
-              <input type="checkbox" data-field="alexa_enabled" ${s.alexa_enabled ? "checked" : ""} />
-              <span>Alexa-Gerätewecker auf dem Echo stellen</span>
-            </label>
-            ${this._fieldText("alexa_media_player", "Echo (alexa_media)", s.alexa_media_player, "media_player.echo")}
-            ${this._fieldText("alexa_text_helper", "Helfer: gesetzter Wecker", s.alexa_text_helper, "input_text.gestellter_alexa_wecker")}
-            ${this._fieldText("alexa_enabled_boolean", "Helfer: Wecker aktiv", s.alexa_enabled_boolean, "input_boolean.wecker_aktiv")}
-            ${this._fieldSelect("alexa_command_type", "Alexa-Befehlstyp", s.alexa_command_type, [
-              ["custom", "custom – Textbefehl (empfohlen)"],
-              ["tts", "tts – gesprochen"],
-            ])}
-            ${this._fieldNumber("pre_alarm_minutes", "Vorab-Wecker Echo (min)", s.pre_alarm_minutes, 0, 30, 1)}
-            ${this._fieldText("reminder_text", "Erinnerungstext ({alarm_time})", s.reminder_text, "Denk an die Arbeitszeit!")}
-          </div>
-          <div class="row end">
-            <button class="btn" id="save-settings">Einstellungen speichern</button>
-          </div>
-        </section>
-
-        <section class="card wide">
-          <h3>Urlaubskalender</h3>
-          ${this._calendar(cal)}
-        </section>
+        ${this._cardWorkTime(entry, s)}
+        ${this._cardTestMode(entry, s)}
+        ${this._cardMode(entry)}
+        ${this._cardAlexa(alexa)}
       </div>
+
+      <section class="card wide">
+        <h3>Einstellungen</h3>
+        <div class="fieldsets">
+          ${this._fieldsetZeiten(s)}
+          ${this._fieldsetGeraete(s)}
+          ${this._fieldsetAlexa(s)}
+        </div>
+        <div class="row end">
+          <span class="dirty ${this._dirty ? "on" : ""}">${this._dirty ? "Ungespeicherte Änderungen" : "Alles gespeichert"}</span>
+          <button class="btn" id="save-settings">Einstellungen speichern</button>
+        </div>
+      </section>
+
+      <section class="card wide">
+        <h3>Urlaubskalender</h3>
+        ${this._calendar(cal)}
+      </section>
       ${tabs}
       <div class="foot">DAC ${esc(DAC_VERSION)} · Alle Einstellungen werden hier gespeichert – der Einrichtungsassistent fragt nichts ab.</div>
+      ${this._datalists(entry)}
     </div>`;
+  }
+
+  // ------------------------------------------------------------------- cards
+  _cardWorkTime(entry, s) {
+    const quick = ["04:00", "05:00", "06:00", "06:30", "07:00", "08:00"];
+    return `
+      <section class="card">
+        <h3>Arbeitsbeginn</h3>
+        <p class="muted">Weckzeit = Arbeitsbeginn − ${esc(entry.offset_minutes)} min</p>
+        <div class="row">
+          <input class="inp time" type="time" id="work-input"
+            value="${hm(entry.work_time) || hm(s.default_alarm_time) || "06:00"}" />
+          <button class="btn" id="set-work">Setzen</button>
+          <button class="btn ghost" id="clear-work" title="Zurücksetzen">Zurücksetzen</button>
+        </div>
+        <div class="chips">
+          ${quick.map((t) => `<button class="chip" data-work="${t}">${t}</button>`).join("")}
+        </div>
+        <p class="hint">${entry.work_time
+          ? `Gesetzt für ${esc(entry.work_time_day || "heute")}`
+          : `Fallback: ${hm(entry.default_alarm_time)} Uhr`}</p>
+      </section>`;
+  }
+
+  _cardTestMode(entry, s) {
+    if (entry.test_mode) {
+      return `
+        <section class="card">
+          <h3>Testmodus <span class="badge">aktiv</span></h3>
+          <p class="muted">Der Testwecker klingelt um ${timeOf(entry.test_target)} – mit Licht, Echo und Wiederholung wie der echte Wecker.</p>
+          <div class="row"><button class="btn danger" id="test-cancel">Testwecker abbrechen</button></div>
+        </section>`;
+    }
+    return `
+      <section class="card">
+        <h3>Testmodus</h3>
+        <p class="muted">Klingelt in X Minuten – prüft die komplette Kette (Licht, Echo, Wiederholung). Gestoppt wird wie der echte Wecker.</p>
+        <div class="row">
+          <input class="inp small" type="number" id="test-minutes" min="1" max="120"
+            value="${esc(s.test_mode_minutes ?? 1)}" />
+          <span class="muted">Minuten</span>
+          <button class="btn" id="test-start">Testwecker starten</button>
+        </div>
+      </section>`;
+  }
+
+  _cardMode(entry) {
+    return `
+      <section class="card">
+        <h3>Modus</h3>
+        <div class="seg">
+          ${["standard", "dismissed", "vacation"].map((m) =>
+            `<button class="segbtn ${entry.mode === m ? "on" : ""}" data-mode="${m}">${esc(modeLabel(m))}</button>`).join("")}
+        </div>
+        <p class="hint">„Urlaub“ überschreibt den Wecker für heute, „Heute aus“ deaktiviert ihn einmalig.</p>
+      </section>`;
+  }
+
+  _cardAlexa(alexa) {
+    const stopWord = alexa.stop_word || "Wecker aus";
+    const routine = alexa.routine_name || "DAC Stopp";
+    return `
+      <section class="card">
+        <h3>Alexa (Echo-Wecker)</h3>
+        <div class="kv"><span>Status</span><b>${alexa.enabled ? "aktiv" : "aus"}</b></div>
+        <div class="kv"><span>Echo</span><b>${esc(alexa.player || "—")}</b></div>
+        <div class="kv"><span>Gesetzter Wecker</span><b>${esc(alexa.stored_alarm || "keiner")}</b></div>
+        <div class="row">
+          <button class="btn" id="alexa-set">Wecker setzen</button>
+          <button class="btn ghost" id="alexa-sync">Sync</button>
+          <button class="btn danger" id="alexa-clear">Löschen</button>
+        </div>
+        <p class="hint">
+          Stoppen per Sprache: In der Alexa-App eine Routine <b>„${esc(routine)}“</b> anlegen –
+          Auslöser „Wecker mit dem Namen <b>${esc(stopWord)}</b> klingelt“, Aktion „Smart-Home-Gerät“ → DAC → Wecker stoppen.
+          DAC benennt seine Echo-Wecker mit genau diesem Stopp-Wort.
+        </p>
+        ${alexa.enabled ? "" : `<p class="hint">Aktiviere Alexa unten in den Einstellungen und wähle deinen Echo.</p>`}
+      </section>`;
+  }
+
+  // ------------------------------------------------------------- fieldsets
+  _fieldsetZeiten(s) {
+    return `
+      <fieldset class="fieldset">
+        <legend>Zeiten &amp; Weckzyklus</legend>
+        <div class="fields">
+          ${this._fieldTime("default_alarm_time", "Standard-Weckzeit (Fallback)", s.default_alarm_time)}
+          ${this._fieldNumber("offset_minutes", "Offset vor Arbeitsbeginn", s.offset_minutes, 0, 600, 5, "min")}
+          ${this._fieldTime("reminder_time", "Tägliche Erinnerung", s.reminder_time)}
+          ${this._fieldNumber("loop_interval_minutes", "Weck-Wiederholung", s.loop_interval_minutes, 1, 60, 1, "min")}
+          ${this._fieldNumber("test_mode_minutes", "Testwecker nach", s.test_mode_minutes, 1, 120, 1, "min")}
+          ${this._fieldText("wake_text", "Weck-Ansage", s.wake_text, "Guten Morgen!")}
+          ${this._fieldText("reminder_text", "Erinnerungstext ({alarm_time})", s.reminder_text, "Denk an die Arbeitszeit!")}
+          ${this._fieldText("vacation_keywords", "Urlaubs-Schlagwörter (Komma-getrennt)", s.vacation_keywords, "urlaub, feiertag")}
+        </div>
+      </fieldset>`;
+  }
+
+  _fieldsetGeraete(s) {
+    return `
+      <fieldset class="fieldset">
+        <legend>Geräte &amp; Benachrichtigung</legend>
+        <div class="fields">
+          ${this._fieldMulti("alarm_lights", "Weck-Lichter", s.alarm_lights, "light.schlafzimmer")}
+          ${this._fieldMulti("media_players", "Weck-Lautsprecher", s.media_players, "media_player.echo")}
+          ${this._fieldText("notifier", "Benachrichtigungsdienst", s.notifier, "notify.mobile_app_…")}
+          ${this._fieldMulti("vacation_calendars", "Externe Urlaubskalender", s.vacation_calendars, "calendar.feiertage")}
+          ${this._fieldNumber("alarm_volume", "Lautstärke (0–1)", s.alarm_volume, 0, 1, 0.05)}
+        </div>
+      </fieldset>`;
+  }
+
+  _fieldsetAlexa(s) {
+    return `
+      <fieldset class="fieldset">
+        <legend>Alexa (Echo-Wecker)</legend>
+        <div class="fields">
+          <label class="switch">
+            <input type="checkbox" data-field="alexa_enabled" ${s.alexa_enabled ? "checked" : ""} />
+            <span>Echten Wecker auf dem Echo stellen</span>
+          </label>
+          ${this._fieldText("alexa_media_player", "Echo (alexa_media)", s.alexa_media_player, "media_player.echo")}
+          ${this._fieldText("alexa_text_helper", "Helfer: gesetzter Wecker", s.alexa_text_helper, "input_text.gestellter_alexa_wecker")}
+          ${this._fieldText("alexa_enabled_boolean", "Helfer: Wecker aktiv", s.alexa_enabled_boolean, "input_boolean.wecker_aktiv")}
+          ${this._fieldSelect("alexa_command_type", "Alexa-Befehlstyp", s.alexa_command_type, [
+            ["custom", "custom – Textbefehl (empfohlen)"],
+            ["tts", "tts – gesprochen"],
+          ])}
+          ${this._fieldNumber("pre_alarm_minutes", "Vorab-Wecker Echo", s.pre_alarm_minutes, 0, 30, 1, "min")}
+          ${this._fieldText("stop_word", "Stopp-Wort (Alexa-Weckername)", s.stop_word, "Wecker aus")}
+        </div>
+      </fieldset>`;
+  }
+
+  // ------------------------------------------------------------ field builder
+  _listId(key) {
+    return ENTITY_GROUPS[key] ? `dl-${key}` : null;
+  }
+
+  _datalists(entry) {
+    const groups = entry.entities || {};
+    return Object.entries(ENTITY_GROUPS).map(([key, group]) => {
+      const items = groups[group] || [];
+      if (!items.length) return "";
+      return `<datalist id="dl-${key}">${items.map((i) =>
+        `<option value="${esc(i.id)}">${esc(i.name)}</option>`).join("")}</datalist>`;
+    }).join("");
   }
 
   _fieldTime(key, label, value) {
     return `<label class="field">
       <span>${esc(label)}</span>
-      <button class="timebtn small" data-timefield="${key}">
-        <span class="timebtn-value">${hm(value) || "--:--"}</span>
-      </button>
+      <input class="inp time" type="time" data-field="${key}" value="${hm(value)}" />
     </label>`;
   }
 
-  _fieldNumber(key, label, value, min, max, step) {
+  _fieldNumber(key, label, value, min, max, step, unit) {
     return `<label class="field">
-      <span>${esc(label)}</span>
+      <span>${esc(label)}${unit ? ` (${esc(unit)})` : ""}</span>
       <input type="number" data-field="${key}" value="${esc(value ?? "")}"
         min="${min}" max="${max}" step="${step}" />
     </label>`;
   }
 
   _fieldText(key, label, value, placeholder) {
+    const list = this._listId(key);
     return `<label class="field">
       <span>${esc(label)}</span>
       <input type="text" data-field="${key}" value="${esc(value ?? "")}"
-        placeholder="${esc(placeholder || "")}" />
+        placeholder="${esc(placeholder || "")}" ${list ? `list="${list}"` : ""} />
+    </label>`;
+  }
+
+  _fieldMulti(key, label, value, placeholder) {
+    const list = this._listId(key);
+    const group = ENTITY_GROUPS[key];
+    const suggestions = (this.entry()?.entities?.[group] || []).slice(0, 6);
+    const current = listToText(value);
+    return `<label class="field">
+      <span>${esc(label)}</span>
+      <input type="text" data-field="${key}" value="${esc(current)}"
+        placeholder="${esc(placeholder || "")}" ${list ? `list="${list}"` : ""} />
+      ${suggestions.length ? `<span class="chips small">${suggestions.map((i) =>
+        `<button class="chip" data-append="${key}" data-value="${esc(i.id)}">+ ${esc(i.name)}</button>`).join("")}</span>` : ""}
     </label>`;
   }
 
@@ -349,6 +472,7 @@ class DacPanel extends HTMLElement {
     </label>`;
   }
 
+  // -------------------------------------------------------------- calendar
   _calendar(cal) {
     const own = {};
     (cal.own || []).forEach((d) => { own[d.date] = d; });
@@ -421,22 +545,26 @@ class DacPanel extends HTMLElement {
     const stop = q("#stop");
     if (stop) stop.onclick = () => this._action({ action: "stop" });
 
-    const pickWork = q("#pick-work");
-    if (pickWork) pickWork.onclick = () =>
-      this._openPicker("Arbeitsbeginn", hm(this.entry().work_time) || "06:00", (value) => {
-        this._action({ action: "set_work_time", time: `${value}:00` });
-      });
-
+    const workInput = q("#work-input");
     const setWork = q("#set-work");
-    if (setWork) setWork.onclick = () => {
-      const value = hm(this.entry().work_time) || "06:00";
-      this._action({ action: "set_work_time", time: `${value}:00` });
-    };
+    if (setWork) setWork.onclick = () =>
+      this._action({ action: "set_work_time", time: `${workInput.value || "06:00"}:00` });
     const clearWork = q("#clear-work");
     if (clearWork) clearWork.onclick = () => this._action({ action: "clear_work_time" });
 
     this.shadowRoot.querySelectorAll("[data-work]").forEach((btn) =>
-      btn.onclick = () => this._action({ action: "set_work_time", time: `${btn.dataset.work}:00` }));
+      btn.onclick = () => {
+        if (workInput) workInput.value = btn.dataset.work;
+        this._action({ action: "set_work_time", time: `${btn.dataset.work}:00` });
+      });
+
+    const testStart = q("#test-start");
+    if (testStart) testStart.onclick = () => {
+      const minutes = Number(q("#test-minutes").value) || 1;
+      this._action({ action: "test_start", minutes });
+    };
+    const testCancel = q("#test-cancel");
+    if (testCancel) testCancel.onclick = () => this._action({ action: "test_cancel" });
 
     this.shadowRoot.querySelectorAll("[data-mode]").forEach((btn) =>
       btn.onclick = () => this._action({ action: "mode", mode: btn.dataset.mode }));
@@ -448,23 +576,32 @@ class DacPanel extends HTMLElement {
     const alexaClear = q("#alexa-clear");
     if (alexaClear) alexaClear.onclick = () => this._action({ action: "alexa_clear" });
 
-    this.shadowRoot.querySelectorAll("[data-timefield]").forEach((btn) =>
-      btn.onclick = () => {
-        const key = btn.dataset.timefield;
-        this._openPicker(btn.closest("label").querySelector("span").textContent,
-          hm(this._settings[key]) || "06:00",
-          (value) => {
-            this._settings[key] = `${value}:00`;
-            this._dirty = true;
-            this._render();
-          });
-      });
-
     this.shadowRoot.querySelectorAll("[data-field]").forEach((input) =>
       input.oninput = () => {
         const key = input.dataset.field;
-        this._settings[key] = input.type === "checkbox" ? input.checked : input.value;
+        const value = input.type === "checkbox" ? input.checked : input.value;
+        this._settings[key] = input.classList.contains("time") && value ? `${value}:00` : value;
         this._dirty = true;
+        this._refreshDirty();
+      });
+    this.shadowRoot.querySelectorAll("select[data-field]").forEach((select) =>
+      select.onchange = () => {
+        this._settings[select.dataset.field] = select.value;
+        this._dirty = true;
+        this._refreshDirty();
+      });
+
+    this.shadowRoot.querySelectorAll("[data-append]").forEach((btn) =>
+      btn.onclick = () => {
+        const key = btn.dataset.append;
+        const value = btn.dataset.value;
+        const field = this.shadowRoot.querySelector(`[data-field="${key}"]`);
+        const parts = String(field.value || "").split(",").map((p) => p.trim()).filter(Boolean);
+        if (!parts.includes(value)) parts.push(value);
+        field.value = parts.join(", ");
+        this._settings[key] = field.value;
+        this._dirty = true;
+        this._refreshDirty();
       });
 
     const save = q("#save-settings");
@@ -513,6 +650,13 @@ class DacPanel extends HTMLElement {
       });
   }
 
+  _refreshDirty() {
+    const el = this.shadowRoot.querySelector(".dirty");
+    if (!el) return;
+    el.classList.toggle("on", this._dirty);
+    el.textContent = this._dirty ? "Ungespeicherte Änderungen" : "Alles gespeichert";
+  }
+
   _selectRange(fromIso, toIso) {
     const from = new Date(fromIso);
     const to = new Date(toIso);
@@ -523,90 +667,6 @@ class DacPanel extends HTMLElement {
       this._selected.add(localIso(d));
     }
   }
-
-  // --------------------------------------------------------- time picker UI
-  _openPicker(title, value, onApply) {
-    const [h0, m0] = (value || "06:00").split(":").map(Number);
-    this._picker = { hour: h0 || 0, minute: m0 || 0, onApply };
-    const hours = Array.from({ length: 24 }, (_, i) => i);
-    const minutes = Array.from({ length: 12 }, (_, i) => i * 5);
-    const root = this.shadowRoot.querySelector("#dialog");
-    root.innerHTML = `
-      <div class="overlay" id="ovl">
-        <div class="picker" role="dialog" aria-label="${esc(title)}">
-          <div class="picker-head">${esc(title)}</div>
-          <div class="picker-value">${String(this._picker.hour).padStart(2, "0")}:${String(this._picker.minute).padStart(2, "0")}</div>
-          <div class="wheels">
-            <div class="wheel" data-wheel="hour">
-              ${hours.map((h) => `<button class="witem ${h === this._picker.hour ? "on" : ""}" data-h="${h}">${String(h).padStart(2, "0")}</button>`).join("")}
-            </div>
-            <div class="colon">:</div>
-            <div class="wheel" data-wheel="minute">
-              ${minutes.map((m) => `<button class="witem ${m === this._picker.minute ? "on" : ""}" data-m="${m}">${String(m).padStart(2, "0")}</button>`).join("")}
-            </div>
-          </div>
-          <div class="chips center">
-            ${["05:00", "06:00", "06:30", "07:00", "08:00"].map((t) =>
-              `<button class="chip" data-preset="${t}">${t}</button>`).join("")}
-          </div>
-          <div class="picker-actions">
-            <button class="btn ghost" id="pick-cancel">Abbrechen</button>
-            <button class="btn" id="pick-ok">Übernehmen</button>
-          </div>
-        </div>
-      </div>`;
-    this._wirePicker();
-  }
-
-  _wirePicker() {
-    const root = this.shadowRoot.querySelector("#dialog");
-    const close = () => { this._picker = null; root.innerHTML = ""; this._render(); };
-
-    root.querySelector("#ovl").onclick = (ev) => { if (ev.target.id === "ovl") close(); };
-    root.querySelector("#pick-cancel").onclick = close;
-    root.querySelector("#pick-ok").onclick = () => {
-      const { hour, minute, onApply } = this._picker;
-      const value = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-      this._picker = null;
-      root.innerHTML = "";
-      onApply(value);
-    };
-
-    root.querySelectorAll("[data-h]").forEach((btn) => btn.onclick = () => {
-      this._picker.hour = Number(btn.dataset.h);
-      this._repaintPicker();
-    });
-    root.querySelectorAll("[data-m]").forEach((btn) => btn.onclick = () => {
-      this._picker.minute = Number(btn.dataset.m);
-      this._repaintPicker();
-    });
-    root.querySelectorAll("[data-preset]").forEach((btn) => btn.onclick = () => {
-      const [h, m] = btn.dataset.preset.split(":").map(Number);
-      this._picker.hour = h;
-      this._picker.minute = m;
-      this._repaintPicker();
-    });
-
-    this._scrollPicker();
-  }
-
-  _repaintPicker() {
-    const root = this.shadowRoot.querySelector("#dialog");
-    root.querySelector(".picker-value").textContent =
-      `${String(this._picker.hour).padStart(2, "0")}:${String(this._picker.minute).padStart(2, "0")}`;
-    root.querySelectorAll("[data-h]").forEach((b) => b.classList.toggle("on", Number(b.dataset.h) === this._picker.hour));
-    root.querySelectorAll("[data-m]").forEach((b) => b.classList.toggle("on", Number(b.dataset.m) === this._picker.minute));
-    this._scrollPicker();
-  }
-
-  _scrollPicker() {
-    const root = this.shadowRoot.querySelector("#dialog");
-    [["hour", this._picker.hour], ["minute", this._picker.minute]].forEach(([kind, value]) => {
-      const wheel = root.querySelector(`[data-wheel="${kind}"]`);
-      const item = kind === "hour" ? wheel.querySelector(`[data-h="${value}"]`) : wheel.querySelector(`[data-m="${value}"]`);
-      if (item) item.scrollIntoView({ block: "center" });
-    });
-  }
 }
 
 const STYLES = `
@@ -615,6 +675,7 @@ const STYLES = `
   .hero { border-radius: 18px; padding: 22px; color: #fff; background: linear-gradient(135deg, ${DAC_NAVY} 0%, #37475a 100%); box-shadow: 0 8px 26px rgba(0,0,0,.22); }
   .tone-ringing { background: linear-gradient(135deg, #b12704, ${DAC_AMBER}); animation: pulse 1.2s infinite; }
   .tone-scheduled { background: linear-gradient(135deg, #146eb4, ${DAC_NAVY}); }
+  .tone-test { background: linear-gradient(135deg, #0f7b6c, ${DAC_NAVY}); }
   .tone-vacation { background: linear-gradient(135deg, #0f7b6c, ${DAC_NAVY}); }
   .tone-dismissed, .tone-stopped { background: linear-gradient(135deg, #4a5568, ${DAC_NAVY}); }
   @keyframes pulse { 50% { filter: brightness(1.22); } }
@@ -630,36 +691,40 @@ const STYLES = `
   .target { opacity: .68; font-size: 13px; margin-top: 2px; }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-top: 16px; }
   .card { background: var(--card-background-color, #fff); border-radius: 16px; padding: 16px 18px; box-shadow: 0 2px 10px rgba(0,0,0,.08); }
-  .card.wide { grid-column: 1 / -1; }
+  .card.wide { grid-column: 1 / -1; margin-top: 16px; }
   h3 { margin: 0 0 6px; font-size: 16px; }
   h4 { margin: 12px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .5px; opacity: .6; }
+  .badge { background: ${DAC_AMBER}; color: #111; border-radius: 999px; font-size: 11px; padding: 2px 9px; margin-left: 6px; vertical-align: middle; }
   .muted { color: var(--secondary-text-color, #6b7280); font-size: 13px; margin: 0 0 10px; }
-  .hint { color: var(--secondary-text-color, #6b7280); font-size: 12px; margin: 10px 0 0; }
+  .hint { color: var(--secondary-text-color, #6b7280); font-size: 12px; margin: 10px 0 0; line-height: 1.5; }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  .row.end { justify-content: flex-end; margin-top: 12px; }
+  .row.end { justify-content: flex-end; margin-top: 14px; }
+  .dirty { font-size: 12px; color: var(--secondary-text-color, #6b7280); margin-right: auto; }
+  .dirty.on { color: ${DAC_AMBER}; font-weight: 700; }
   .btn { background: linear-gradient(180deg, #ffb84d, ${DAC_AMBER}); color: #111; border: none; border-radius: 10px; padding: 10px 16px; font-weight: 700; cursor: pointer; font-size: 14px; }
   .btn:hover { filter: brightness(1.06); }
   .btn.ghost { background: transparent; color: inherit; border: 1px solid var(--divider-color, rgba(0,0,0,.22)); }
   .btn.danger { background: #b12704; color: #fff; }
   .btn.tiny { padding: 3px 9px; font-size: 12px; }
   .btn.stop { background: #fff; color: #b12704; font-size: 16px; padding: 13px 22px; margin-top: 14px; width: 100%; }
-  .timebtn { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; background: var(--secondary-background-color, #eef1f5); border: 1px solid var(--divider-color, rgba(0,0,0,.12)); border-radius: 12px; padding: 10px 16px; cursor: pointer; color: inherit; }
-  .timebtn.small { padding: 8px 12px; }
-  .timebtn-value { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .timebtn.small .timebtn-value { font-size: 18px; }
-  .timebtn-hint { font-size: 11px; opacity: .6; }
   .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
-  .chips.center { justify-content: center; }
+  .chips.small { margin-top: 6px; }
+  .chips.small .chip { font-size: 11px; padding: 3px 9px; }
   .chip { background: var(--secondary-background-color, #eef1f5); border: 1px solid var(--divider-color, rgba(0,0,0,.1)); border-radius: 999px; padding: 6px 12px; cursor: pointer; font-size: 13px; color: inherit; }
   .seg { display: flex; gap: 6px; background: var(--secondary-background-color, #eef1f5); border-radius: 12px; padding: 4px; }
   .segbtn { flex: 1; border: none; background: transparent; border-radius: 9px; padding: 9px; cursor: pointer; font-weight: 600; color: inherit; }
   .segbtn.on { background: ${DAC_AMBER}; color: #111; }
   .kv { display: flex; justify-content: space-between; padding: 5px 0; font-size: 14px; border-bottom: 1px solid var(--divider-color, rgba(0,0,0,.07)); }
-  .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin-top: 8px; }
+  .fieldsets { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 8px; }
+  .fieldset { border: 1px solid var(--divider-color, rgba(0,0,0,.1)); border-radius: 14px; padding: 10px 14px 14px; margin: 0; }
+  .fieldset legend { font-size: 12px; text-transform: uppercase; letter-spacing: .6px; opacity: .65; padding: 0 6px; }
+  .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
   .field { display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
   .field > span { color: var(--secondary-text-color, #6b7280); }
-  .inp, .field input[type=text], .field input[type=number] { background: var(--secondary-background-color, #eef1f5); border: 1px solid var(--divider-color, rgba(0,0,0,.12)); border-radius: 10px; padding: 9px 11px; font-size: 14px; color: inherit; width: 100%; box-sizing: border-box; }
-  .switch { display: flex; align-items: center; gap: 10px; grid-column: 1 / -1; font-size: 14px; padding: 6px 0; }
+  .inp, .field input[type=text], .field input[type=number], .field input[type=time], .field select { background: var(--secondary-background-color, #eef1f5); border: 1px solid var(--divider-color, rgba(0,0,0,.12)); border-radius: 10px; padding: 9px 11px; font-size: 14px; color: inherit; width: 100%; box-sizing: border-box; }
+  .inp.time { width: auto; font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .inp.small { width: 90px; }
+  .switch { display: flex; align-items: center; gap: 10px; font-size: 14px; padding: 6px 0; grid-column: 1 / -1; }
   .switch input { width: 20px; height: 20px; }
   .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
   .cal-week, .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
@@ -683,16 +748,6 @@ const STYLES = `
   .banner.error { background: #b12704; color: #fff; padding: 14px 16px; border-radius: 12px; }
   .empty { background: var(--card-background-color, #fff); border-radius: 16px; padding: 40px; text-align: center; }
   .foot { text-align: center; color: var(--secondary-text-color, #6b7280); font-size: 12px; margin: 20px 0; }
-  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; z-index: 10; }
-  .picker { background: var(--card-background-color, #fff); border-radius: 20px; padding: 20px; width: min(420px, 92vw); box-shadow: 0 20px 60px rgba(0,0,0,.4); }
-  .picker-head { font-weight: 700; text-align: center; margin-bottom: 4px; }
-  .picker-value { text-align: center; font-size: 40px; font-weight: 700; font-variant-numeric: tabular-nums; color: ${DAC_AMBER}; }
-  .wheels { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 12px 0; }
-  .wheel { height: 180px; overflow-y: auto; scroll-snap-type: y mandatory; display: flex; flex-direction: column; gap: 4px; width: 90px; padding: 4px; }
-  .witem { scroll-snap-align: center; border: none; background: transparent; padding: 10px 0; font-size: 20px; border-radius: 10px; cursor: pointer; color: inherit; font-variant-numeric: tabular-nums; }
-  .witem.on { background: ${DAC_AMBER}; color: #111; font-weight: 700; }
-  .colon { font-size: 28px; font-weight: 700; }
-  .picker-actions { display: flex; justify-content: space-between; gap: 10px; margin-top: 16px; }
 `;
 
 if (!customElements.get("dac-panel")) {

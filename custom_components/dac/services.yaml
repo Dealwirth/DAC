@@ -32,7 +32,48 @@ set_work_time:
 
 stop_alarm:
   name: Wecker stoppen
-  description: Stoppt die laufende Weck-Schleife (Licht + Media-Player).
+  description: >-
+    Stoppt die laufende Weck-Schleife (Licht + Media-Player) und den Echo-Wecker.
+    Genau dieser Dienst wird auch von der Alexa-Routine „DAC Stopp“ aufgerufen,
+    damit der Wecker per Sprache beendet werden kann.
+  fields:
+    config_entry_id:
+      name: Config-Eintrag
+      description: >-
+        Nur nötig, wenn mehrere DAC-Einträge existieren – wählt die passende
+        Instanz explizit aus.
+      selector:
+        text:
+
+start_test_alarm:
+  name: Testwecker starten
+  description: >-
+    Stellt einen einmaligen Testwecker, der nach X Minuten klingelt (Standard
+    aus den Einstellungen). Verhält sich exakt wie der echte Wecker: Licht,
+    Lautsprecher, Echo-Vorab-Wecker und Alexa-Gate – so lässt sich die komplette
+    Kette gefahrlos prüfen. Gestoppt wird er über dac.stop_alarm, den Panel-
+    Button oder das Alexa-Stopp-Wort.
+  fields:
+    config_entry_id:
+      name: Config-Eintrag
+      description: >-
+        Nur nötig, wenn mehrere DAC-Einträge existieren – wählt die passende
+        Instanz explizit aus.
+      selector:
+        text:
+    minutes:
+      name: Minuten bis zum Klingeln
+      description: Optional – überschreibt die eingestellte Testdauer.
+      example: 1
+      selector:
+        number:
+          min: 1
+          max: 120
+          unit_of_measurement: min
+
+cancel_test_alarm:
+  name: Testwecker abbrechen
+  description: Bricht einen noch nicht klingelnden Testwecker ab.
   fields:
     config_entry_id:
       name: Config-Eintrag

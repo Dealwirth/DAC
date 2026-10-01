@@ -99,10 +99,29 @@ def test_panel_element_matches_js() -> None:
 
 
 def test_panel_js_has_core_ui() -> None:
-    """The panel ships the time wheel, the month calendar and settings fields."""
+    """The panel ships simple time inputs, the month calendar and settings fields."""
     js = PANEL_JS.read_text(encoding="utf-8")
-    assert "data-wheel" in js          # pleasant time picker
-    assert "cal-grid" in js            # real month calendar
-    assert "save_settings" in js       # settings live in the panel
+    assert 'type="time"' in js      # native, simple time picker
+    assert "data-work" in js        # quick work-time chips
+    assert "cal-grid" in js         # real month calendar
+    assert "save_settings" in js    # settings live in the panel
     assert "add_vacation" in js
     assert "alexa_set" in js
+    assert "test_start" in js       # test mode
+
+
+def test_panel_js_offers_entity_suggestions() -> None:
+    """Entity fields get a datalist and clickable suggestion chips."""
+    js = PANEL_JS.read_text(encoding="utf-8")
+    assert "datalist" in js
+    assert "dl-alarm_lights" in js or "dl-${key}" in js
+    assert "data-append" in js
+
+
+def test_panel_js_uses_entity_group_mapping() -> None:
+    """The panel maps each option to the entity group from the API payload."""
+    js = PANEL_JS.read_text(encoding="utf-8")
+    assert "ENTITY_GROUPS" in js
+    assert "alarm_lights" in js and "media_players" in js
+    assert "input_boolean" in js
+
