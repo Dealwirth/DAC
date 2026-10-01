@@ -6,7 +6,6 @@ from typing import Any
 
 from homeassistant.util import dt as dt_util
 
-
 # --- Alexa text-command helpers ---------------------------------------------
 
 

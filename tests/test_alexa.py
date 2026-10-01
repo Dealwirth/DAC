@@ -99,7 +99,7 @@ async def test_bridge_sync_places_only_own_alarm(
     await coordinator.alexa.async_sync()
 
     texts = [data.get("media_content_id", "") for d, s, data in service_calls if s == "play_media"]
-    assert "stelle einen Wecker auf 05:58 Uhr morgens" in texts
+    assert any(t.startswith("stelle einen Wecker auf 05:58 Uhr morgens") for t in texts)
     helper_writes = [data.get("value") for d, s, data in service_calls if s == "set_value"]
     assert "05:58" in helper_writes
 
@@ -172,7 +172,7 @@ async def test_pre_alarm_ignores_gate(
     texts = [data.get("media_content_id", "") for d, s, data in service_calls if s == "play_media"]
     assert len(texts) == 1
     assert texts[0].startswith("stelle einen Wecker auf ")
-    assert texts[0].endswith("Uhr morgens") or texts[0].endswith("Uhr abends")
+    assert "Uhr morgens" in texts[0] or "Uhr abends" in texts[0]
 
 
 async def test_command_type_custom_by_default(coordinator) -> None:
@@ -236,7 +236,7 @@ async def test_service_set_alarm_uses_explicit_time(
 
     texts = [data.get("media_content_id", "") for d, s, data in service_calls if s == "play_media"]
     assert "lösche den Wecker um 06:00 Uhr" in texts
-    assert "stelle einen Wecker auf 07:15 Uhr morgens" in texts
+    assert any(t.startswith("stelle einen Wecker auf 07:15 Uhr morgens") for t in texts)
     helper_writes = [data.get("value") for d, s, data in service_calls if s == "set_value"]
     assert "07:15" in helper_writes
 

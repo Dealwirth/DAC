@@ -12,6 +12,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.dac.const import (
     CONF_DEFAULT_ALARM_TIME,
     CONF_OFFSET,
+    CONF_TEST_MODE_MINUTES,
     CONF_VACATION_KEYWORDS,
     DOMAIN,
 )
@@ -209,3 +210,63 @@ def test_range_days_swaps_and_expands() -> None:
     days = _range_days("2026-09-21", "2026-09-19")
     assert [d.isoformat() for d in days] == ["2026-09-19", "2026-09-20", "2026-09-21"]
     assert _range_days(None, None) == []
+
+
+async def test_get_exposes_entity_suggestions(hass: HomeAssistant, loaded_entry) -> None:
+    """GET /api/dac offers the existing entities for the panel pickers."""
+    hass.states.async_set("light.bedroom", "off", {"friendly_name": "Schlafzimmer"})
+    hass.states.async_set("media_player.echo", "idle", {"friendly_name": "Echo"})
+    hass.states.async_set("input_boolean.wecker_aktiv", "off", {})
+
+    view = DacApiView()
+    entry = _payload(await view.get(FakeRequest(hass)))["entries"][0]
+    entities = entry["entities"]
+    assert "light.bedroom" in [i["id"] for i in entities["lights"]]
+    assert "media_player.echo" in [i["id"] for i in entities["media_players"]]
+    assert "input_boolean.wecker_aktiv" in [i["id"] for i in entities["input_boolean"]]
+    assert entities["lights"][0]["name"]  # friendly names are carried along
+
+
+async def test_post_test_mode_start_and_cancel(hass: HomeAssistant, loaded_entry) -> None:
+    """The panel can arm and cancel a test alarm through the API."""
+    view = DacApiView()
+    coordinator = hass.data[DOMAIN][loaded_entry.entry_id]
+
+    start = await view.post(FakeRequest(hass, {"action": "test_start", "minutes": 2}))
+    assert _payload(start) == {"ok": True}
+    assert coordinator.test_mode_active is True
+
+    entry = _payload(await view.get(FakeRequest(hass)))["entries"][0]
+    assert entry["test_mode"] is True
+    assert entry["test_target"] is not None
+
+    cancel = await view.post(FakeRequest(hass, {"action": "test_cancel"}))
+    assert _payload(cancel) == {"ok": True}
+    assert coordinator.test_mode_active is False
+
+
+async def test_post_test_mode_uses_configured_minutes(
+    hass: HomeAssistant, loaded_entry
+) -> None:
+    """Without a body value the configured test duration is used."""
+    from datetime import timedelta
+
+    from homeassistant.util import dt as dt_util
+
+    view = DacApiView()
+    coordinator = hass.data[DOMAIN][loaded_entry.entry_id]
+    coordinator._options[CONF_TEST_MODE_MINUTES] = 4
+
+    await view.post(FakeRequest(hass, {"action": "test_start"}))
+    assert coordinator.test_mode_active is True
+    delta = coordinator._test_target - dt_util.now()
+    assert timedelta(minutes=4) - timedelta(seconds=2) <= delta <= timedelta(minutes=4)
+
+
+async def test_post_exposes_loop_interval(hass: HomeAssistant, loaded_entry) -> None:
+    """The wake loop interval is part of the panel payload."""
+    view = DacApiView()
+    entry = _payload(await view.get(FakeRequest(hass)))["entries"][0]
+    assert entry["loop_interval_minutes"] == 5
+    assert entry["alexa"]["stop_word"] == "Wecker aus"
+    assert entry["alexa"]["routine_name"] == "DAC Stopp"

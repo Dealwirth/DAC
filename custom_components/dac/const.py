@@ -1,7 +1,6 @@
 """Constants for the DAC – Dynamic Alarm Clock integration."""
 from __future__ import annotations
 
-from datetime import timedelta
 from typing import Final
 
 DOMAIN: Final = "dac"
@@ -11,6 +10,8 @@ MANUFACTURER: Final = "Dealwirth"
 SERVICE_SET_WORK_TIME: Final = "set_work_time"
 SERVICE_STOP_ALARM: Final = "stop_alarm"
 SERVICE_DISMISS_FOR_TODAY: Final = "dismiss_for_today"
+SERVICE_START_TEST_ALARM: Final = "start_test_alarm"
+SERVICE_CANCEL_TEST_ALARM: Final = "cancel_test_alarm"
 
 # --- Config / option keys --------------------------------------------------
 CONF_DEFAULT_ALARM_TIME: Final = "default_alarm_time"          # "06:00"
@@ -25,6 +26,9 @@ CONF_ALARM_VOLUME: Final = "alarm_volume"                      # 0.0 .. 1.0
 CONF_VACATION_KEYWORDS: Final = "vacation_keywords"            # words that mark a day as off
 CONF_WAKE_TEXT: Final = "wake_text"                            # spoken/announced wake text
 CONF_ALEXA_COMMAND_TYPE: Final = "alexa_command_type"          # "custom" (text command) or "tts"
+CONF_LOOP_INTERVAL_MINUTES: Final = "loop_interval_minutes"    # how often the alarm repeats
+CONF_TEST_MODE_MINUTES: Final = "test_mode_minutes"            # test alarm rings in N minutes
+CONF_STOP_WORD: Final = "stop_word"                            # word that stops the alarm via Alexa
 
 # --- Defaults --------------------------------------------------------------
 DEFAULT_NAME: Final = "DAC"
@@ -47,8 +51,15 @@ DEFAULT_VACATION_KEYWORDS: Final = (
     "holiday",
 )
 DEFAULT_WAKE_TEXT: Final = "Guten Morgen! Es ist Zeit aufzustehen."
-DEFAULT_LOOP_INTERVAL: Final = timedelta(minutes=5)
+DEFAULT_LOOP_INTERVAL_MINUTES: Final = 5
+DEFAULT_TEST_MODE_MINUTES: Final = 1
+DEFAULT_STOP_WORD: Final = "Wecker aus"
 DEFAULT_VACATION_SCAN_TIME: Final = "00:01"
+
+# Loop interval bounds (a too-short interval would spam the Echo/players).
+MIN_LOOP_INTERVAL_MINUTES: Final = 1
+MAX_LOOP_INTERVAL_MINUTES: Final = 60
+MAX_TEST_MODE_MINUTES: Final = 120
 
 # --- Internal states (sensor attribute + diagnostics) ----------------------
 STATE_IDLE: Final = "idle"
@@ -99,6 +110,13 @@ DEFAULT_ALEXA_COMMAND_TYPE: Final = ALEXA_COMMAND_TYPE_CUSTOM
 # Alexa from asking back for the time of day.
 ALEXA_SET_TEXT: Final = "stelle einen Wecker auf {time} Uhr {tod}"
 ALEXA_CLEAR_TEXT: Final = "lösche den Wecker um {time} Uhr"
+
+# Optional "stop the alarm by voice": DAC sets an Alexa routine trigger phrase
+# as a *device alarm label*. When that labelled alarm rings, the Alexa app can
+# run a routine ("DAC Stopp") that calls dac.stop_alarm – no custom skill,
+# no cloud hook, works with the official Alexa app only.
+ALEXA_STOP_ALARM_TEXT: Final = "stelle einen Wecker auf {time} Uhr {tod} namens {label}"
+ALEXA_ROUTINE_NAME: Final = "DAC Stopp"
 
 # --- Services (Alexa) -------------------------------------------------------
 SERVICE_SET_ALEXA_ALARM: Final = "set_alexa_alarm"

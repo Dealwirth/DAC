@@ -22,7 +22,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_platform as ep
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN
+from .const import ALEXA_ROUTINE_NAME, DOMAIN
 from .coordinator import DacCoordinator
 from .logic import event_marks_vacation
 from .settings import EDITABLE_KEYS, coerce_options, default_options, vacation_keywords
@@ -70,6 +70,10 @@ class DacApiView(HomeAssistantView):
                 await coordinator.async_save_state()
             elif action == "stop":
                 await coordinator.async_stop_alarm(_Call({}))
+            elif action == "test_start":
+                await coordinator.async_start_test_alarm(_Call({"minutes": body.get("minutes")}))
+            elif action == "test_cancel":
+                await coordinator.async_cancel_test_alarm(_Call({}))
             elif action == "dismiss":
                 await coordinator._async_dismiss_for(dt_util.now().date())
             elif action == "mode":
@@ -267,10 +271,39 @@ async def _entry_payload(hass: HomeAssistant, coordinator: DacCoordinator) -> di
         "alarm_target": data.get("alarm_target"),
         "offset_minutes": data.get("offset_minutes"),
         "default_alarm_time": data.get("default_alarm_time"),
+        "loop_interval_minutes": data.get("loop_interval_minutes"),
+        "test_mode": data.get("test_mode"),
+        "test_target": data.get("test_target"),
         "settings": _settings_payload(options),
         "alexa": _alexa_payload(coordinator),
         "calendar": calendar,
+        "entities": _entity_suggestions(hass),
     }
+
+
+def _entity_suggestions(hass: HomeAssistant) -> dict[str, list[dict[str, str]]]:
+    """Existing entities the panel can suggest for the entity pickers.
+
+    Grouped by the option they belong to so the frontend can render a
+    datalist per field without any extra round trip.
+    """
+    wanted = {
+        "lights": ("light",),
+        "media_players": ("media_player",),
+        "calendars": ("calendar",),
+        "notifiers": ("notify",),
+        "input_text": ("input_text",),
+        "input_boolean": ("input_boolean",),
+    }
+    suggestions: dict[str, list[dict[str, str]]] = {}
+    for group, domains in wanted.items():
+        items: list[dict[str, str]] = []
+        for domain in domains:
+            for state in hass.states.async_all(domain):
+                name = state.attributes.get("friendly_name") or state.entity_id
+                items.append({"id": state.entity_id, "name": str(name)})
+        suggestions[group] = sorted(items, key=lambda item: item["id"])
+    return suggestions
 
 
 def _settings_payload(options: dict[str, Any]) -> dict[str, Any]:
@@ -295,6 +328,8 @@ def _alexa_payload(coordinator: DacCoordinator) -> dict:
         "gate_on": bool(gate_state) and gate_state.state == "on",
         "stored_alarm": bridge.stored_alarm(),
         "pre_alarm_minutes": bridge.pre_alarm_minutes,
+        "stop_word": bridge.stop_word,
+        "routine_name": ALEXA_ROUTINE_NAME,
     }
 
 

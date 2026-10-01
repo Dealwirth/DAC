@@ -31,7 +31,10 @@
           "pre_alarm_minutes": "Vorab-Wecker auf dem Echo: Minuten vor der Weckzeit",
           "vacation_keywords": "Urlaubs-Schlagwörter (Komma-getrennt)",
           "wake_text": "Weck-Ansage (TTS-Text)",
-          "alexa_command_type": "Alexa-Befehlstyp (custom = Textbefehl, tts = gesprochen)"
+          "alexa_command_type": "Alexa-Befehlstyp (custom = Textbefehl, tts = gesprochen)",
+          "loop_interval_minutes": "Weck-Wiederholung: alle N Minuten erneut wecken (1-60)",
+          "test_mode_minutes": "Testwecker: klingelt nach N Minuten",
+          "stop_word": "Stopp-Wort (Name des Echo-Weckers für die Alexa-Stopp-Routine)"
         }
       }
     }
@@ -70,7 +73,7 @@
     },
     "stop_alarm": {
       "name": "Wecker stoppen",
-      "description": "Stoppt die laufende Weck-Schleife."
+      "description": "Stoppt die laufende Weck-Schleife und den Echo-Wecker. Genau dieser Dienst wird auch von der Alexa-Routine „DAC Stopp“ aufgerufen."
     },
     "dismiss_for_today": {
       "name": "Für heute deaktivieren",
@@ -83,6 +86,14 @@
     "clear_alexa_alarm": {
       "name": "Alexa-Wecker löschen (nur DAC-eigener)",
       "description": "Löscht exakt nur den von DAC gesetzten Echo-Wecker – manuelle Alexa-Wecker bleiben unberührt."
+    },
+    "start_test_alarm": {
+      "name": "Testwecker starten",
+      "description": "Klingelt einmalig nach N Minuten (Standard aus den Einstellungen) mit der kompletten Weck-Kette. Stoppen über stop_alarm, den Panel-Button oder das Alexa-Stopp-Wort."
+    },
+    "cancel_test_alarm": {
+      "name": "Testwecker abbrechen",
+      "description": "Bricht einen noch nicht klingelnden Testwecker ab."
     }
   }
 }

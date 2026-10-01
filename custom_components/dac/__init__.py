@@ -14,10 +14,12 @@ from .const import (
     ATTR_TIME,
     DOMAIN,
     PLATFORMS,
+    SERVICE_CANCEL_TEST_ALARM,
     SERVICE_CLEAR_ALEXA_ALARM,
     SERVICE_DISMISS_FOR_TODAY,
     SERVICE_SET_ALEXA_ALARM,
     SERVICE_SET_WORK_TIME,
+    SERVICE_START_TEST_ALARM,
     SERVICE_STOP_ALARM,
 )
 from .coordinator import DacCoordinator
@@ -47,6 +49,10 @@ SET_ALEXA_SCHEMA = vol.Schema(
     }
 )
 CLEAR_ALEXA_SCHEMA = vol.Schema({vol.Optional(_ENTRY_ID): str})
+START_TEST_SCHEMA = vol.Schema(
+    {vol.Optional(_ENTRY_ID): str, vol.Optional("minutes"): vol.Coerce(int)}
+)
+CANCEL_TEST_SCHEMA = vol.Schema({vol.Optional(_ENTRY_ID): str})
 
 _SERVICE_MAP = {
     SERVICE_SET_WORK_TIME: (SET_WORK_TIME_SCHEMA, SupportsResponse.NONE),
@@ -54,6 +60,8 @@ _SERVICE_MAP = {
     SERVICE_DISMISS_FOR_TODAY: (DISMISS_SCHEMA, SupportsResponse.NONE),
     SERVICE_SET_ALEXA_ALARM: (SET_ALEXA_SCHEMA, SupportsResponse.NONE),
     SERVICE_CLEAR_ALEXA_ALARM: (CLEAR_ALEXA_SCHEMA, SupportsResponse.NONE),
+    SERVICE_START_TEST_ALARM: (START_TEST_SCHEMA, SupportsResponse.NONE),
+    SERVICE_CANCEL_TEST_ALARM: (CANCEL_TEST_SCHEMA, SupportsResponse.NONE),
 }
 
 
@@ -115,6 +123,10 @@ def _make_handler(hass: HomeAssistant, service: str) -> Any:
             await coordinator.alexa.async_set_alarm(call)
         elif service == SERVICE_CLEAR_ALEXA_ALARM:
             await coordinator.alexa.async_clear_own()
+        elif service == SERVICE_START_TEST_ALARM:
+            await coordinator.async_start_test_alarm(call)
+        elif service == SERVICE_CANCEL_TEST_ALARM:
+            await coordinator.async_cancel_test_alarm(call)
 
     return handler
 

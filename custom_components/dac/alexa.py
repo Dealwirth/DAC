@@ -24,7 +24,7 @@ from homeassistant.util import dt as dt_util
 from .const import (
     ALEXA_COMMAND_TYPE_CUSTOM,
     ALEXA_COMMAND_TYPE_TTS,
-    ALEXA_SET_TEXT,
+    ALEXA_STOP_ALARM_TEXT,
     ATTR_DAY,
     ATTR_TIME,
     CONF_ALEXA_COMMAND_TYPE,
@@ -34,11 +34,19 @@ from .const import (
     CONF_ALEXA_TEXT_HELPER,
     CONF_MEDIA_PLAYERS,
     CONF_PRE_ALARM_MINUTES,
+    CONF_STOP_WORD,
     DEFAULT_ALEXA_ENABLED_BOOLEAN,
     DEFAULT_ALEXA_TEXT_HELPER,
     DEFAULT_PRE_ALARM_MINUTES,
+    DEFAULT_STOP_WORD,
 )
-from .logic import alexa_clear_text, alexa_set_text, format_alexa_time, parse_time_str
+from .logic import (
+    alexa_clear_text,
+    alexa_set_text,
+    format_alexa_time,
+    parse_time_str,
+    split_am_pm,
+)
 
 if TYPE_CHECKING:
     from .coordinator import DacCoordinator
@@ -52,6 +60,7 @@ class AlexaBridge:
     def __init__(self, hass: HomeAssistant, coordinator: DacCoordinator) -> None:
         self.hass = hass
         self.coordinator = coordinator
+        self._last_pre_alarm_time: Any = None
 
     # ----------------------------------------------------------------- config
     @property
@@ -94,6 +103,19 @@ class AlexaBridge:
             return max(0, int(self._options.get(CONF_PRE_ALARM_MINUTES, DEFAULT_PRE_ALARM_MINUTES)))
         except (TypeError, ValueError):
             return DEFAULT_PRE_ALARM_MINUTES
+
+    @property
+    def stop_word(self) -> str:
+        """Label used for the Echo alarms so an Alexa routine can stop DAC.
+
+        DAC names every alarm it places on the device with this label. In the
+        Alexa app the user creates one routine ("DAC Stopp") whose trigger is
+        "when an alarm with this name rings" and whose action calls the HA
+        script/service ``dac.stop_alarm`` – no custom skill and no cloud hook
+        required, and it works even if Home Assistant is briefly offline.
+        """
+        value = str(self._options.get(CONF_STOP_WORD) or DEFAULT_STOP_WORD).strip()
+        return value or DEFAULT_STOP_WORD
 
     # ------------------------------------------------------------------ state
     def gate_on(self) -> bool:
@@ -148,7 +170,7 @@ class AlexaBridge:
         if stored:
             await self.async_send_text(alexa_clear_text(parse_time_str(stored)))
         if desired:
-            await self.async_send_text(alexa_set_text(parse_time_str(desired)))
+            await self.async_send_text(self._set_command(parse_time_str(desired)))
         await self._async_write_helper(desired or "")
 
     async def async_set_alarm(self, call: ServiceCall | Any) -> None:
@@ -174,7 +196,7 @@ class AlexaBridge:
         stored = self.stored_alarm()
         if stored and stored != text:
             await self.async_send_text(alexa_clear_text(parse_time_str(stored)))
-        await self.async_send_text(alexa_set_text(value))
+        await self.async_send_text(self._set_command(value))
         await self._async_write_helper(text)
         _LOGGER.debug("DAC placed a manual Alexa alarm for %s (%s)", text, call.data.get(ATTR_DAY))
 
@@ -193,6 +215,21 @@ class AlexaBridge:
         await self.async_set_gate(False)
 
     # ------------------------------------------------------------- pre-alarm
+    def _set_command(self, value: Any) -> str:
+        """The 'set an alarm' command, labelled with the stop word when set.
+
+        The label is what an Alexa routine can listen for ("when an alarm
+        named 'Wecker aus' rings -> call dac.stop_alarm"), so stopping the
+        alarm by voice needs no custom skill.
+        """
+        base = alexa_set_text(value)
+        label = self.stop_word
+        if not label:
+            return base
+        return ALEXA_STOP_ALARM_TEXT.format(
+            time=format_alexa_time(value), tod=split_am_pm(value), label=label
+        )
+
     async def async_pre_alarm(self) -> None:
         """Place a fresh short device alarm while the wake loop rings.
 
@@ -202,9 +239,13 @@ class AlexaBridge:
         """
         if not self.enabled:
             return
-        text = ALEXA_SET_TEXT.format(
-            time=self.pre_alarm_time_text(), tod=self.pre_alarm_tod()
-        )
+        time_text = self.pre_alarm_time_text()
+        if time_text == self._last_pre_alarm_time:
+            # Same minute as the previous loop iteration – do not spam the Echo
+            # with an identical command.
+            return
+        self._last_pre_alarm_time = time_text
+        text = self._set_command(parse_time_str(time_text))
         await self.async_send_text(text)
 
     def pre_alarm_time_text(self) -> str:
@@ -220,8 +261,6 @@ class AlexaBridge:
 
     def pre_alarm_tod(self) -> str:
         """'morgens'/'abends' for the pre-alarm time."""
-        from .logic import split_am_pm
-
         alarm_time = self.coordinator._alarm_time or dt_util.now().time()
         pre = self.pre_alarm_minutes
         if pre:

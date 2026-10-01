@@ -27,6 +27,8 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import (
+    ALEXA_COMMAND_TYPE_CUSTOM,
+    ALEXA_COMMAND_TYPES,
     CONF_ALARM_LIGHTS,
     CONF_ALARM_VOLUME,
     CONF_ALEXA_COMMAND_TYPE,
@@ -35,33 +37,40 @@ from .const import (
     CONF_ALEXA_MEDIA_PLAYER,
     CONF_ALEXA_TEXT_HELPER,
     CONF_DEFAULT_ALARM_TIME,
+    CONF_LOOP_INTERVAL_MINUTES,
     CONF_MEDIA_PLAYERS,
     CONF_NOTIFIER,
     CONF_OFFSET,
     CONF_PRE_ALARM_MINUTES,
     CONF_REMINDER_TEXT,
     CONF_REMINDER_TIME,
+    CONF_STOP_WORD,
+    CONF_TEST_MODE_MINUTES,
     CONF_VACATION_CALENDARS,
     CONF_VACATION_KEYWORDS,
     CONF_WAKE_TEXT,
-    ALEXA_COMMAND_TYPE_CUSTOM,
-    ALEXA_COMMAND_TYPES,
     DEFAULT_ALARM_TIME,
     DEFAULT_ALARM_VOLUME,
     DEFAULT_ALEXA_COMMAND_TYPE,
     DEFAULT_ALEXA_ENABLED,
     DEFAULT_ALEXA_ENABLED_BOOLEAN,
     DEFAULT_ALEXA_TEXT_HELPER,
+    DEFAULT_LOOP_INTERVAL_MINUTES,
     DEFAULT_OFFSET_MINUTES,
     DEFAULT_PRE_ALARM_MINUTES,
     DEFAULT_REMINDER_TEXT,
     DEFAULT_REMINDER_TIME,
+    DEFAULT_STOP_WORD,
+    DEFAULT_TEST_MODE_MINUTES,
     DEFAULT_VACATION_KEYWORDS,
     DEFAULT_WAKE_TEXT,
+    MAX_LOOP_INTERVAL_MINUTES,
+    MAX_TEST_MODE_MINUTES,
+    MIN_LOOP_INTERVAL_MINUTES,
 )
 
 TIME_KEYS = (CONF_DEFAULT_ALARM_TIME, CONF_REMINDER_TIME)
-INT_KEYS = (CONF_OFFSET, CONF_PRE_ALARM_MINUTES)
+INT_KEYS = (CONF_OFFSET, CONF_PRE_ALARM_MINUTES, CONF_LOOP_INTERVAL_MINUTES, CONF_TEST_MODE_MINUTES)
 FLOAT_KEYS = (CONF_ALARM_VOLUME,)
 BOOL_KEYS = (CONF_ALEXA_ENABLED,)
 LIST_KEYS = (CONF_ALARM_LIGHTS, CONF_MEDIA_PLAYERS, CONF_VACATION_CALENDARS)
@@ -72,6 +81,7 @@ STR_KEYS = (
     CONF_ALEXA_TEXT_HELPER,
     CONF_ALEXA_ENABLED_BOOLEAN,
     CONF_ALEXA_COMMAND_TYPE,
+    CONF_STOP_WORD,
     CONF_WAKE_TEXT,
     CONF_VACATION_KEYWORDS,
 )
@@ -85,6 +95,20 @@ EDITABLE_KEYS: tuple[str, ...] = (
     *LIST_KEYS,
     *STR_KEYS,
 )
+
+# Fallbacks and hard bounds for the integer options.
+_INT_DEFAULTS: dict[str, int] = {
+    CONF_OFFSET: DEFAULT_OFFSET_MINUTES,
+    CONF_PRE_ALARM_MINUTES: DEFAULT_PRE_ALARM_MINUTES,
+    CONF_LOOP_INTERVAL_MINUTES: DEFAULT_LOOP_INTERVAL_MINUTES,
+    CONF_TEST_MODE_MINUTES: DEFAULT_TEST_MODE_MINUTES,
+}
+_INT_BOUNDS: dict[str, tuple[int, int]] = {
+    CONF_OFFSET: (0, 600),
+    CONF_PRE_ALARM_MINUTES: (0, 30),
+    CONF_LOOP_INTERVAL_MINUTES: (MIN_LOOP_INTERVAL_MINUTES, MAX_LOOP_INTERVAL_MINUTES),
+    CONF_TEST_MODE_MINUTES: (1, MAX_TEST_MODE_MINUTES),
+}
 
 
 def default_options() -> dict[str, Any]:
@@ -105,6 +129,9 @@ def default_options() -> dict[str, Any]:
         CONF_ALEXA_ENABLED_BOOLEAN: DEFAULT_ALEXA_ENABLED_BOOLEAN,
         CONF_ALEXA_COMMAND_TYPE: DEFAULT_ALEXA_COMMAND_TYPE,
         CONF_PRE_ALARM_MINUTES: DEFAULT_PRE_ALARM_MINUTES,
+        CONF_LOOP_INTERVAL_MINUTES: DEFAULT_LOOP_INTERVAL_MINUTES,
+        CONF_TEST_MODE_MINUTES: DEFAULT_TEST_MODE_MINUTES,
+        CONF_STOP_WORD: DEFAULT_STOP_WORD,
         CONF_VACATION_KEYWORDS: ", ".join(DEFAULT_VACATION_KEYWORDS),
         CONF_WAKE_TEXT: DEFAULT_WAKE_TEXT,
     }
@@ -165,8 +192,14 @@ def coerce_options(data: dict[str, Any], base: dict[str, Any] | None = None) -> 
         if key in TIME_KEYS:
             result[key] = time_to_str(value, result.get(key) or DEFAULT_ALARM_TIME)
         elif key in INT_KEYS:
-            fallback = DEFAULT_OFFSET_MINUTES if key == CONF_OFFSET else DEFAULT_PRE_ALARM_MINUTES
-            result[key] = _as_int(value, _as_int(result.get(key), fallback))
+            fallback = _INT_DEFAULTS.get(key, 0)
+            value_int = _as_int(value, _as_int(result.get(key), fallback))
+            low, high = _INT_BOUNDS.get(key, (None, None))
+            if low is not None:
+                value_int = max(low, value_int)
+            if high is not None:
+                value_int = min(high, value_int)
+            result[key] = value_int
         elif key in FLOAT_KEYS:
             result[key] = max(
                 0.0,
@@ -271,6 +304,36 @@ def build_settings_schema(hass: Any, defaults: dict[str, Any]) -> vol.Schema:
                 CONF_PRE_ALARM_MINUTES,
                 default=defaults.get(CONF_PRE_ALARM_MINUTES, DEFAULT_PRE_ALARM_MINUTES),
             ): NumberSelector(NumberSelectorConfig(min=0, max=30, step=1, mode=NumberSelectorMode.BOX)),
+            vol.Required(
+                CONF_LOOP_INTERVAL_MINUTES,
+                default=defaults.get(
+                    CONF_LOOP_INTERVAL_MINUTES, DEFAULT_LOOP_INTERVAL_MINUTES
+                ),
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=MIN_LOOP_INTERVAL_MINUTES,
+                    max=MAX_LOOP_INTERVAL_MINUTES,
+                    step=1,
+                    unit_of_measurement="min",
+                    mode=NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Required(
+                CONF_TEST_MODE_MINUTES,
+                default=defaults.get(CONF_TEST_MODE_MINUTES, DEFAULT_TEST_MODE_MINUTES),
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=1,
+                    max=MAX_TEST_MODE_MINUTES,
+                    step=1,
+                    unit_of_measurement="min",
+                    mode=NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Optional(
+                CONF_STOP_WORD,
+                default=defaults.get(CONF_STOP_WORD, DEFAULT_STOP_WORD),
+            ): TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT)),
             vol.Optional(
                 CONF_VACATION_KEYWORDS,
                 default=defaults.get(CONF_VACATION_KEYWORDS, ", ".join(DEFAULT_VACATION_KEYWORDS)),
