@@ -6,7 +6,7 @@ Repo: https://github.com/Dealwirth/DAC
 
 ## Umgebung
 - Python 3.13, Home Assistant 2026.2.3 (Test-Matrix in `.github/workflows/ci.yml`).
-- Tests: `python -m pytest tests -q` (146 Tests). Konfiguration in `pytest.ini`.
+- Tests: `python -m pytest tests -q` (147 Tests). Konfiguration in `pytest.ini`.
 - Lint: `python -m ruff check custom_components tests`.
 - JS-Syntaxcheck: `node --check custom_components/dac/www/dac-panel.js`.
 
