@@ -439,6 +439,9 @@ def _alexa_payload(coordinator: DacCoordinator) -> dict:
         "stored_alarm": bridge.stored_alarm(),
         "pre_alarm_minutes": bridge.pre_alarm_minutes,
         "stop_word": bridge.stop_word,
+        "alarm_name": bridge.alarm_name,
+        "reminder_via_alexa": coordinator.reminder_via_alexa,
+        "reminder_volume": bridge.reminder_volume,
         "routine_name": ALEXA_ROUTINE_NAME,
     }
 
