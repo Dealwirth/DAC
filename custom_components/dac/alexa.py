@@ -59,6 +59,7 @@ class AlexaBridge:
         self.hass = hass
         self.coordinator = coordinator
         self._last_pre_alarm_time: Any = None
+        self._pre_alarm: Any = None
 
     # ----------------------------------------------------------------- config
     @property
@@ -198,6 +199,7 @@ class AlexaBridge:
 
     async def async_on_stop(self) -> None:
         """Tag 4: stop the wake loop – kill device alarm, gate and helper text."""
+        await self.async_clear_pre_alarm()
         await self.async_clear_own()
         await self.async_set_gate(False)
 
@@ -228,7 +230,23 @@ class AlexaBridge:
             # with an identical command.
             return
         self._last_pre_alarm_time = time_text
+        self._pre_alarm = parse_time_str(time_text)
         await self.async_send_text(self._set_command(parse_time_str(time_text)))
+
+    async def async_clear_pre_alarm(self) -> None:
+        """Delete the short pre-alarm placed while the wake loop was ringing.
+
+        The pre-alarm is what actually wakes the user; without deleting it a
+        stop would still let the Echo ring a few minutes later. The stored
+        input_text helper only tracks the scheduled alarm, so the pre-alarm
+        time has to be remembered separately.
+        """
+        if not self.enabled or self._pre_alarm is None:
+            return
+        value = self._pre_alarm
+        self._pre_alarm = None
+        self._last_pre_alarm_time = None
+        await self.async_send_text(alexa_clear_text(value))
 
     def pre_alarm_time_text(self) -> str:
         """The time string used for the pre-alarm command."""

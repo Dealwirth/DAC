@@ -338,6 +338,8 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if not was_test:
                 self._stopped_days.add(dt_util.now().date())
             await self._async_stop_loop(set_state=STATE_STOPPED)
+            # Stopping the alarm means getting up: the lights go off again.
+            await self._async_turn_off_lights()
         else:
             await self._async_stop_loop()
         if was_ringing:

@@ -14,7 +14,7 @@ und erinnert dich abends, wenn du vergessen hast, deine Arbeitszeit zu setzen.
 | Feature | Beschreibung |
 |---|---|
 | **Dynamischer Wecker** | Arbeitsbeginn setzen (NFC, Dashboard, Dienst oder Entität) → Weckzeit = Arbeitsbeginn − Offset |
-| **Weck-Loop** | Licht an + neuer Echo-Wecker im einstellbaren Intervall (1–60 min, Standard 5), bis explizit gestoppt (Home Assistant, Panel oder Alexa) |
+| **Weck-Loop** | Licht an + neuer Echo-Wecker im einstellbaren Intervall (1–60 min, Standard 5), bis explizit gestoppt (Home Assistant, Panel oder Alexa) – beim Stopp geht das Licht wieder aus |
 | **Not-Aus** | Klingelt der Wecker zu lange, stoppt er sich selbst nach N Minuten (einstellbar, 0 = unbegrenzt) – Licht geht dabei aus |
 | **Fallback-Weckzeit** | Wurde nichts gesetzt, greift eine konfigurierbare Standard-Weckzeit (z. B. 06:00) – mit intelligenter Cutoff-Logik |
 | **Urlaub & Feiertage** | Täglicher Scan (00:01) gegen einen eigenen Urlaubskalender und/oder externe Kalender; Keywords wie *Urlaub, Feiertag, Ferien, vacation, holiday* |
@@ -165,7 +165,7 @@ automation:
 
 ### `dac.stop_alarm`
 
-Stoppt die laufende Weck-Schleife (Licht) und löscht den Echo-Wecker.
+Stoppt die laufende Weck-Schleife, schaltet die Weck-Lichter aus und löscht den Echo-Wecker (inkl. des kurzen Vorab-Weckers, damit nach dem Stopp nichts nachklingelt).
 **Genau dieser Dienst wird von der Alexa-Stopp-Routine aufgerufen**,
 damit der Wecker auch per Sprache beendet werden kann.
 
@@ -266,7 +266,7 @@ py -m venv .venv
 .venv/Scripts/python -m pytest tests -v
 ```
 
-122 Tests decken die komplette Weck-Logik ab: Offset-Berechnung, Mitternachts-Wrap,
+127 Tests decken die komplette Weck-Logik ab: Offset-Berechnung, Mitternachts-Wrap,
 Fallback-/Cutoff-Semantik inkl. Oversleep-Schutz, Weck-Loop mit einstellbarem
 Intervall, Testmodus (Armen/Klingeln/Abbruch/Stopp), Dismiss, Vacation-Check,
 Reminder, Persistenz, Alexa-Bridge (morgens/abends, echter Geräte-Wecker ohne TTS,
