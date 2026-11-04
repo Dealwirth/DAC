@@ -12,7 +12,7 @@
  * Domains stehen zuerst, „auch gefunden“ danach. So findet man einen Echo,
  * ohne den genauen Entity-Namen zu kennen.
  */
-const DAC_VERSION = "0.8.1";
+const DAC_VERSION = "0.8.2";
 const DAC_AMBER = "#ff9900";
 const DAC_NAVY = "#232f3e";
 const MAX_SUGGESTIONS = 10;
@@ -349,7 +349,10 @@ class DacBase extends HTMLElement {
     if (!box) return;
     const query = (input && input.value || "").trim();
     const domains = FIELD_DOMAINS[key] || null;
-    const chosen = new Set(splitList(this._settings[key]));
+    // Only multi fields hide already picked entities; a single field shows its
+    // current value too, otherwise it would claim "nothing found" for itself.
+    const multi = this._isMulti(key);
+    const chosen = multi ? new Set(splitList(this._settings[key])) : new Set();
     const { primary, extra } = searchEntities(this.entities(), query, domains);
     const usable = primary.filter((item) => !chosen.has(item.id));
     const extraUsable = extra.filter((item) => !chosen.has(item.id));
@@ -359,9 +362,11 @@ class DacBase extends HTMLElement {
         : `<span class="muted">Tippen, um zu suchen.</span>`;
       return;
     }
+    const current = multi ? "" : String(this._settings[key] || "");
     const render = (items) => items.map((item) =>
-      `<button class="chip suggest ${item.alexa ? "alexa" : ""}" data-pick="${key}" data-value="${esc(item.id)}">
-        ${item.alexa ? "🔊 " : ""}${esc(item.name)}
+      `<button class="chip suggest ${item.alexa ? "alexa" : ""} ${item.id === current ? "current" : ""}"
+         data-pick="${key}" data-value="${esc(item.id)}">
+        ${item.alexa ? "🔊 " : ""}${esc(item.name)}${item.id === current ? " ✓" : ""}
         <em>${esc(item.id)}${item.area ? ` · ${esc(item.area)}` : ""}</em></button>`).join("");
     box.innerHTML = render(usable) + (extraUsable.length
       ? `<span class="extra-label">auch gefunden</span>${render(extraUsable)}`
@@ -1027,6 +1032,7 @@ const STYLES = `
   .suggestions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; min-height: 8px; }
   .chip.suggest { text-align: left; }
   .chip.suggest.alexa { border-color: #146eb4; background: rgba(20,110,180,.1); }
+  .chip.suggest.current { border-color: #0f7b6c; background: rgba(15,123,108,.12); font-weight: 700; }
   .chip.suggest em { display: block; font-style: normal; opacity: .55; font-size: 11px; }
   .extra-label { width: 100%; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; opacity: .5; margin-top: 4px; }
   .chosen-row { display: flex; gap: 6px; flex-wrap: wrap; }

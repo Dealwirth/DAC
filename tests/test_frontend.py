@@ -194,3 +194,26 @@ console.log(JSON.stringify({
     assert data["emptyCount"] == 2
     assert data["emptyHasSensor"] is False
 
+
+
+def test_panel_js_has_new_v08_options() -> None:
+    """The settings page exposes the new v0.8 options."""
+    js = PANEL_JS.read_text(encoding="utf-8")
+    for key in (
+        "alexa_alarm_name",
+        "reminder_via_alexa",
+        "reminder_alexa_volume",
+        "turn_off_lights_on_stop",
+    ):
+        assert key in js, key
+
+
+def test_panel_js_single_field_keeps_current_value() -> None:
+    """Single-value entity fields must not hide their own current value.
+
+    Regression: a single field filtered out the entity it already held, so the
+    picker wrongly showed "Nichts gefunden für <current id>".
+    """
+    js = PANEL_JS.read_text(encoding="utf-8")
+    assert "const multi = this._isMulti(key);" in js
+    assert 'chip.suggest.current' in js
