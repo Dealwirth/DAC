@@ -156,6 +156,46 @@ async def test_on_stop_turns_off_gate(
     )
 
 
+async def test_stop_clears_pending_pre_alarm(
+    hass: HomeAssistant, coordinator, service_calls: list[tuple[str, str, dict]]
+) -> None:
+    """A stop must also delete the short pre-alarm the loop placed.
+
+    The pre-alarm is what actually wakes the user. It is not tracked in the
+    input_text helper, so without an explicit delete the Echo would still ring
+    a few minutes after "Wecker stoppen".
+    """
+    coordinator._options[CONF_ALEXA_ENABLED] = True
+    coordinator._alarm_time = time(6, 0)
+    await coordinator.alexa.async_pre_alarm()
+
+    await coordinator.alexa.async_on_stop()
+
+    texts = [data.get("media_content_id", "") for d, s, data in service_calls if s == "play_media"]
+    assert any(t.startswith("lösche den Wecker um ") for t in texts)
+
+
+async def test_clear_pre_alarm_without_one_sends_nothing(
+    hass: HomeAssistant, coordinator, service_calls: list[tuple[str, str, dict]]
+) -> None:
+    """Without a pending pre-alarm no delete command is sent."""
+    coordinator._options[CONF_ALEXA_ENABLED] = True
+    await coordinator.alexa.async_clear_pre_alarm()
+    assert not [1 for d, s, _ in service_calls if s == "play_media"]
+
+
+async def test_pre_alarm_repeats_when_minute_changes(
+    hass: HomeAssistant, coordinator, service_calls: list[tuple[str, str, dict]]
+) -> None:
+    """The loop re-places the pre-alarm once the target minute moved on."""
+    coordinator._options[CONF_ALEXA_ENABLED] = True
+    coordinator._alarm_time = time(6, 0)
+    await coordinator.alexa.async_pre_alarm()
+    first = len([1 for d, s, _ in service_calls if s == "play_media"])
+    await coordinator.alexa.async_pre_alarm()  # same minute -> suppressed
+    assert len([1 for d, s, _ in service_calls if s == "play_media"]) == first
+
+
 async def test_pre_alarm_ignores_gate(
     hass: HomeAssistant, coordinator, service_calls: list[tuple[str, str, dict]]
 ) -> None:

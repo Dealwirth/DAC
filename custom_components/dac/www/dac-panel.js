@@ -12,7 +12,7 @@
  * Domains stehen zuerst, „auch gefunden“ danach. So findet man einen Echo,
  * ohne den genauen Entity-Namen zu kennen.
  */
-const DAC_VERSION = "0.7.0";
+const DAC_VERSION = "0.7.1";
 const DAC_AMBER = "#ff9900";
 const DAC_NAVY = "#232f3e";
 const MAX_SUGGESTIONS = 10;

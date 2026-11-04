@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
 from custom_components.dac.const import (
+    CONF_ALARM_LIGHTS,
     CONF_ALEXA_ENABLED,
     CONF_LOOP_INTERVAL_MINUTES,
     CONF_MAX_RING_MINUTES,
@@ -291,3 +292,41 @@ async def test_max_ring_minutes_default_and_bounds(coordinator: DacCoordinator) 
     assert coordinator.max_ring_minutes == 0
     coordinator._options[CONF_MAX_RING_MINUTES] = 9999
     assert coordinator.max_ring_minutes == 600
+
+
+@freeze_time("2026-09-06 05:00:00")
+async def test_stop_turns_alarm_lights_off(
+    hass: HomeAssistant, coordinator: DacCoordinator
+) -> None:
+    """Stopping a ringing alarm switches the lights back off.
+
+    Regression for the live bug: after "Wecker stoppen" the alarm was idle but
+    the lights stayed on all night.
+    """
+    coordinator._options[CONF_ALARM_LIGHTS] = ["light.1"]
+    hass.states.async_set("light.1", "off")
+    patcher, calls = _record_calls(hass)
+    with patcher:
+        await coordinator.async_set_work_time(FakeCall({"time": "15:00"}))
+        await coordinator._alarm_fired(dt_util.now())
+        assert any(c[0] == "light" and c[1] == "turn_on" for c in calls)
+        hass.states.async_set("light.1", "on")  # the fire switched it on
+        await coordinator.async_stop_alarm(FakeCall({}))
+    assert any(c[0] == "light" and c[1] == "turn_off" for c in calls)
+
+
+@freeze_time("2026-09-06 05:00:00")
+async def test_safety_cap_turns_alarm_lights_off(
+    hass: HomeAssistant, coordinator: DacCoordinator
+) -> None:
+    """The safety stop also switches the lights off (matches the docs)."""
+    coordinator._options[CONF_MAX_RING_MINUTES] = 60
+    coordinator._options[CONF_ALARM_LIGHTS] = ["light.1"]
+    hass.states.async_set("light.1", "on")
+    patcher, calls = _record_calls(hass)
+    with patcher:
+        await coordinator.async_set_work_time(FakeCall({"time": "15:00"}))
+        await coordinator._alarm_fired(dt_util.now())
+        await coordinator._loop_tick(dt_util.now() + timedelta(minutes=61))
+    assert coordinator._state == "stopped"
+    assert any(c[0] == "light" and c[1] == "turn_off" for c in calls)
