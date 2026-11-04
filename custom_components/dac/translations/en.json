@@ -17,7 +17,7 @@
         "data": {
           "default_alarm_time": "Default alarm time (fallback when no work time is set)",
           "offset_minutes": "Offset: minutes to wake up BEFORE work starts",
-          "reminder_time": "Daily reminder at (checks whether a work time was set)",
+          "reminder_time": "Daily reminder at (status check + quiet announcement on the Echo)",
           "reminder_text": "Reminder text ({alarm_time} is replaced)",
           "notifier": "Target notification service (notify.*)",
           "alarm_lights": "Alarm lights (optional)",
@@ -31,7 +31,11 @@
           "loop_interval_minutes": "Wake loop: repeat every N minutes until stopped (1-60)",
           "max_ring_minutes": "Safety stop: stop the alarm automatically after N minutes (0 = ring until stopped)",
           "test_mode_minutes": "Test mode: test alarm rings after N minutes",
-          "stop_word": "Stop word: name of the Echo alarm that stops DAC via an Alexa routine"
+          "stop_word": "Stop word: name of the Echo alarm that stops DAC via an Alexa routine",
+          "reminder_via_alexa": "Also speak the reminder quietly on the Echo",
+          "reminder_alexa_volume": "Volume of the Echo reminder (%)",
+          "alexa_alarm_name": "Name of the Echo alarm (empty = no name, Alexa won't ask back)",
+          "turn_off_lights_on_stop": "Turn the lights off on stop (default: lights stay on)"
         }
       }
     }

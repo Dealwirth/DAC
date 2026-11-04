@@ -16,6 +16,7 @@ The AM/PM suffix stops Alexa from asking back for the time of day.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
@@ -25,14 +26,17 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    ALEXA_STOP_ALARM_TEXT,
+    ALEXA_SET_NAMED_TEXT,
+    ALEXA_SET_PLAIN_TEXT,
     ATTR_DAY,
     ATTR_TIME,
+    CONF_ALEXA_ALARM_NAME,
     CONF_ALEXA_ENABLED,
     CONF_ALEXA_ENABLED_BOOLEAN,
     CONF_ALEXA_MEDIA_PLAYER,
     CONF_ALEXA_TEXT_HELPER,
     CONF_PRE_ALARM_MINUTES,
+    CONF_REMINDER_ALEXA_VOLUME,
     CONF_STOP_WORD,
     DEFAULT_ALEXA_ENABLED_BOOLEAN,
     DEFAULT_ALEXA_TEXT_HELPER,
@@ -60,6 +64,9 @@ class AlexaBridge:
         self.coordinator = coordinator
         self._last_pre_alarm_time: Any = None
         self._pre_alarm: Any = None
+        # Serialise syncs: set_work_time triggers a background sync while the
+        # service may await one too – without this the alarm is placed twice.
+        self._sync_lock = asyncio.Lock()
 
     # ----------------------------------------------------------------- config
     @property
@@ -124,42 +131,53 @@ class AlexaBridge:
 
     # ------------------------------------------------------------------ sync
     async def async_sync(self) -> None:
-        """Reconcile the device alarm with the currently computed DAC alarm."""
+        """Reconcile the device alarm with the currently computed DAC alarm.
+
+        The Echo alarm is placed for the *next* alarm – today **or** tomorrow.
+        A work time is normally set in the evening and therefore targets the
+        next morning; restricting this to "today" silently produced no alarm at
+        all, so the user was never woken up.
+        """
         if not self.enabled:
             return
+        async with self._sync_lock:
+            desired = self._desired_alarm_text()
+            stored = self.stored_alarm()
+            if stored == desired:
+                return
+            if stored:
+                await self.async_send_text(alexa_clear_text(parse_time_str(stored)))
+            if desired:
+                await self.async_send_text(self._set_command(parse_time_str(desired)))
+            await self._async_write_helper(desired or "")
+
+    def _desired_alarm_text(self) -> str | None:
+        """The device alarm DAC currently wants on the Echo ('HH:MM' or None).
+
+        None only when there must be no alarm at all (vacation, dismissed,
+        ringing, or nothing scheduled). The concrete day is irrelevant for the
+        Echo – it only knows times – so an alarm for tomorrow is placed the
+        same way as one for today.
+        """
         coordinator = self.coordinator
-        today = dt_util.now().date()
+        if coordinator._is_vacation or coordinator._state == "ringing":
+            return None
+        if coordinator._alarm_time is None or coordinator._alarm_target is None:
+            return None
+        if coordinator._alarm_day is not None and coordinator._alarm_day in coordinator._dismissed_days:
+            return None
 
-        desired: str | None = None
-        if (
-            not coordinator._is_vacation
-            and coordinator._state != "ringing"
-            and coordinator._alarm_day == today
-            and coordinator._alarm_time is not None
-            and today not in coordinator._dismissed_days
-        ):
-            alarm_time = coordinator._alarm_time
-            pre = self.pre_alarm_minutes
-            if pre:
-                # Only shift into the past if it stays on the same day; a
-                # negative shift across midnight would set a wrong-day alarm.
-                shifted = (
-                    dt_util.start_of_local_day(today)
-                    + timedelta(hours=alarm_time.hour, minutes=alarm_time.minute)
-                    - timedelta(minutes=pre)
-                )
-                if shifted.date() == today and shifted.time() < alarm_time:
-                    alarm_time = shifted.time()
-            desired = format_alexa_time(alarm_time)
-
-        stored = self.stored_alarm()
-        if stored == desired:
-            return
-        if stored:
-            await self.async_send_text(alexa_clear_text(parse_time_str(stored)))
-        if desired:
-            await self.async_send_text(self._set_command(parse_time_str(desired)))
-        await self._async_write_helper(desired or "")
+        # The real wake-up moment is ``_alarm_target`` (work time MINUS offset);
+        # ``_alarm_time`` is the work start, so using it would ring an hour late.
+        target = coordinator._alarm_target
+        pre = self.pre_alarm_minutes
+        if pre:
+            # Only shift into the past if it stays on the same day; a negative
+            # shift across midnight would set the alarm on the wrong day.
+            shifted = target - timedelta(minutes=pre)
+            if shifted.date() == target.date():
+                target = shifted
+        return format_alexa_time(target.time())
 
     async def async_set_alarm(self, call: ServiceCall | Any) -> None:
         """Handle dac.set_alexa_alarm – optional explicit time override.
@@ -204,16 +222,26 @@ class AlexaBridge:
         await self.async_set_gate(False)
 
     # ------------------------------------------------------------- pre-alarm
-    def _set_command(self, value: Any) -> str:
-        """The 'set an alarm' command, named with the stop word.
+    @property
+    def alarm_name(self) -> str:
+        """Optional name given to the Echo alarm (empty = no name).
 
         The name is what an Alexa routine listens for ("an alarm named
         'Wecker aus' rings -> call dac.stop_alarm"), so stopping by voice needs
-        no custom skill.
+        no custom skill. It is optional: a name can make Alexa ask back or
+        refuse the command on some devices, so the default is a plain alarm.
         """
-        return ALEXA_STOP_ALARM_TEXT.format(
-            time=format_alexa_time(value), tod=split_am_pm(value), label=self.stop_word
-        )
+        raw = self._options.get(CONF_ALEXA_ALARM_NAME)
+        return str(raw).strip() if raw else ""
+
+    def _set_command(self, value: Any) -> str:
+        """The 'set an alarm' command (named only when a name is configured)."""
+        time_text = format_alexa_time(value)
+        tod = split_am_pm(value)
+        name = self.alarm_name
+        if name:
+            return ALEXA_SET_NAMED_TEXT.format(time=time_text, tod=tod, label=name)
+        return ALEXA_SET_PLAIN_TEXT.format(time=time_text, tod=tod)
 
     async def async_pre_alarm(self) -> None:
         """Place a fresh short device alarm while the wake loop rings.
@@ -260,6 +288,90 @@ class AlexaBridge:
         return format_alexa_time(alarm_time)
 
     # ------------------------------------------------------------------ io
+    @property
+    def reminder_volume(self) -> int:
+        """Volume (percent) used for the spoken reminder."""
+        try:
+            value = int(self._options.get(CONF_REMINDER_ALEXA_VOLUME, 15))
+        except (TypeError, ValueError):
+            value = 15
+        return max(1, min(100, value))
+
+    def _speak_service(self) -> tuple[str, str] | None:
+        """Find a notify service that makes the Echo speak (alexa_media)."""
+        player = self.player
+        if not player:
+            return None
+        object_id = player.split(".", 1)[1]
+        for name in (f"alexa_media_{object_id}", "alexa_media"):
+            if self.hass.services.has_service("notify", name):
+                return "notify", name
+        return None
+
+    async def async_speak(self, text: str, volume: int | None = None) -> bool:
+        """Speak a short message on the Echo (no alarm, just a quiet notice).
+
+        The Echo volume is lowered for the message and restored afterwards, so
+        a reminder at 21:00 never blasts the room. Returns True when a speak
+        service was available.
+        """
+        if not self.enabled or not text:
+            return False
+        service = self._speak_service()
+        if service is None:
+            return False
+
+        player = self.player
+        target_volume = (volume or self.reminder_volume) / 100
+        previous = self._current_volume()
+        try:
+            if previous is not None:
+                await self.hass.services.async_call(
+                    "media_player",
+                    "volume_set",
+                    {"entity_id": player, "volume_level": target_volume},
+                    blocking=True,
+                )
+            data: dict[str, Any] = {"message": text, "data": {"type": "tts"}}
+            if service[1] == "alexa_media":
+                data["target"] = [player]
+            await self.hass.services.async_call(service[0], service[1], data, blocking=True)
+        except Exception as err:  # noqa: BLE001 – a reminder must never break DAC
+            _LOGGER.warning("DAC could not speak on %s: %s", player, err)
+            return False
+        finally:
+            if previous is not None:
+                self._schedule_volume_restore(player, previous)
+        return True
+
+    def _current_volume(self) -> float | None:
+        """Current volume level of the Echo (None when unknown)."""
+        state = self.hass.states.get(self.player) if self.player else None
+        if state is None:
+            return None
+        value = state.attributes.get("volume_level")
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _schedule_volume_restore(self, player: str, volume: float) -> None:
+        """Restore the Echo volume shortly after the spoken reminder."""
+        from homeassistant.helpers.event import async_call_later
+
+        async def _restore(_now: Any) -> None:
+            try:
+                await self.hass.services.async_call(
+                    "media_player",
+                    "volume_set",
+                    {"entity_id": player, "volume_level": volume},
+                    blocking=True,
+                )
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.debug("DAC could not restore the volume of %s: %s", player, err)
+
+        async_call_later(self.hass, 12, _restore)
+
     async def async_send_text(self, text: str) -> None:
         """Send a plain Alexa text command to the Echo device."""
         player = self.player
