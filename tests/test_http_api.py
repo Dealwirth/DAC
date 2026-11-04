@@ -390,3 +390,19 @@ async def test_post_exposes_loop_interval(hass: HomeAssistant, loaded_entry) -> 
     assert entry["loop_interval_minutes"] == 5
     assert entry["alexa"]["stop_word"] == "Wecker aus"
     assert entry["alexa"]["routine_name"] == "DAC Stopp"
+
+
+async def test_post_alexa_sync_forces_placement(hass: HomeAssistant, loaded_entry) -> None:
+    """The panel "Sync" button must force a placement, not silently no-op.
+
+    Live bug: the helper matched a lost Echo alarm, so a plain sync did
+    nothing and the device stayed without an alarm.
+    """
+    coordinator = hass.data[DOMAIN][loaded_entry.entry_id]
+    coordinator._options["alexa_enabled"] = True
+    with patch.object(
+        type(coordinator.alexa), "async_sync", new=AsyncMock()
+    ) as sync:
+        response = await DacApiView().post(FakeRequest(hass, {"action": "alexa_sync"}))
+    assert _payload(response) == {"ok": True}
+    assert sync.await_args.kwargs.get("force") is True
