@@ -186,9 +186,14 @@ class AlexaBridge:
             stored = self.stored_alarm()
             if stored == desired and not force:
                 return
-            if stored:
+            if stored and stored != desired:
+                # A different time must be removed first, otherwise the old
+                # alarm would keep ringing next to the new one.
                 await self.async_send_text(alexa_clear_text(parse_time_str(stored)))
             if desired:
+                # Same time + force: only re-place it. Clearing first and then
+                # placing in quick succession made the device drop the second
+                # command, so the alarm was gone after a "Sync".
                 await self.async_send_text(self._set_command(parse_time_str(desired)))
             await self._async_write_helper(desired or "")
 

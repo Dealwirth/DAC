@@ -456,3 +456,28 @@ async def test_ensure_scheduled_keeps_existing_alarm(
 
     texts = [data.get("media_content_id", "") for d, s, data in service_calls if s == "play_media"]
     assert texts == []
+
+
+@freeze_time("2026-09-06 19:00:00")
+async def test_force_sync_does_not_clear_same_time_alarm(
+    hass: HomeAssistant, coordinator, service_calls: list[tuple[str, str, dict]]
+) -> None:
+    """A forced sync must re-place the alarm, not delete it.
+
+    Regression for a live bug: force-sync cleared the stored alarm and then
+    placed it again in quick succession; the Echo dropped the second command,
+    so pressing "Sync" left the user with *no* alarm at all.
+    """
+    from tests.conftest import FakeCall
+
+    coordinator._options[CONF_ALEXA_ENABLED] = True
+    await coordinator.async_set_work_time(FakeCall({"time": "06:45"}))
+    desired = coordinator.alexa._desired_alarm_text()
+    _set_state(hass, "input_text.gestellter_alexa_wecker", desired)
+
+    service_calls.clear()
+    await coordinator.alexa.async_sync(force=True)
+
+    texts = [data.get("media_content_id", "") for d, s, data in service_calls if s == "play_media"]
+    assert any(t.startswith("stelle einen Wecker auf ") for t in texts), texts
+    assert not any(t.startswith("lösche den Wecker") for t in texts), texts
