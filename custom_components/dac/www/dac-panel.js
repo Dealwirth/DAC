@@ -12,7 +12,7 @@
  * Domains stehen zuerst, „auch gefunden“ danach. So findet man einen Echo,
  * ohne den genauen Entity-Namen zu kennen.
  */
-const DAC_VERSION = "0.7.3";
+const DAC_VERSION = "0.8.0";
 const DAC_AMBER = "#ff9900";
 const DAC_NAVY = "#232f3e";
 const MAX_SUGGESTIONS = 10;
@@ -622,19 +622,22 @@ class DacPanel extends DacBase {
   _cardAlexa(alexa) {
     const stopWord = alexa.stop_word || "Wecker aus";
     const routine = alexa.routine_name || "DAC Stopp";
+    const ok = alexa.enabled && alexa.player_ok;
     return `
       <section class="card">
-        <h3>Alexa (Echo-Wecker)</h3>
-        <div class="kv"><span>Status</span><b>${alexa.enabled ? "aktiv" : "aus"}</b></div>
+        <h3>Alexa (Echo-Wecker) ${ok ? `<span class="badge ok">bereit</span>` : ""}</h3>
+        <div class="kv"><span>Status</span><b>${alexa.enabled ? (alexa.player_ok ? "aktiv" : "⚠️ Echo nicht gefunden") : "aus"}</b></div>
         <div class="kv"><span>Echo</span><b>${esc(alexa.player ? this._entityName(alexa.player) : "—")}</b></div>
-        <div class="kv"><span>Gesetzter Wecker</span><b>${esc(alexa.stored_alarm || "keiner")}</b></div>
+        <div class="kv"><span>Wecker auf dem Echo</span><b>${esc(alexa.stored_alarm || "keiner")}</b></div>
+        <div class="kv"><span>Name des Weckers</span><b>${esc(alexa.alarm_name || "ohne Namen")}</b></div>
         <div class="row">
-          <button class="btn" id="alexa-set">Wecker setzen</button>
+          <button class="btn" id="alexa-set">Wecker jetzt stellen</button>
           <button class="btn ghost" id="alexa-sync">Sync</button>
           <button class="btn danger" id="alexa-clear">Löschen</button>
         </div>
         ${alexa.enabled ? "" : `<p class="hint">Aktiviere Alexa und wähle deinen Echo auf der Seite <button class="linklike" data-page="settings">Einstellungen</button> – dort genügt ein Suchbegriff wie „Echo“.</p>`}
-        <p class="hint">Stoppen per Sprache: Alexa-App → Routine <b>„${esc(routine)}“</b>, Auslöser „Wecker mit dem Namen <b>${esc(stopWord)}</b> klingelt“, Aktion „Smart-Home-Gerät → DAC → Wecker stoppen“.</p>
+        ${alexa.enabled && !alexa.player_ok ? `<p class="hint">Der gewählte Echo ist gerade nicht verfügbar. Prüfe die Auswahl in den <button class="linklike" data-page="settings">Einstellungen</button>.</p>` : ""}
+        <p class="hint">Der Wecker wird automatisch gestellt – auch für morgen. Stoppen per Sprache: Alexa-App → Routine <b>„${esc(routine)}“</b>, Auslöser „Wecker mit dem Namen <b>${esc(stopWord)}</b> klingelt“, Aktion „Smart-Home-Gerät → DAC → Wecker stoppen“.</p>
       </section>`;
   }
 
@@ -646,13 +649,13 @@ class DacPanel extends DacBase {
     return `
       <section class="card wide">
         <h3>Urlaubskalender</h3>
-        <p class="muted">Tage markieren und mit einem Namen speichern. DAC legt sie im eigenen Kalender ab – sie erscheinen auch in Home Assistant.</p>
+        <p class="muted">Tage anklicken und mit einem Namen speichern – DAC weckt an diesen Tagen nicht. Die Tage landen im eigenen Kalender und erscheinen auch in Home Assistant.</p>
         ${this._calendar(cal)}
       </section>
 
       <section class="card wide">
-        <h3>Home-Assistant-Kalender</h3>
-        <p class="muted">Welche Kalender DAC als Urlaub/Feiertag wertet, stellst du in den <button class="linklike" data-page="settings">Einstellungen</button> ein.</p>
+        <h3>Mit Home-Assistant-Kalendern verknüpfen</h3>
+        <p class="muted">Wähle in den <button class="linklike" data-page="settings">Einstellungen</button> deine Kalender (z. B. „Petrys“). DAC liest sie und erkennt Urlaub/Feiertag anhand der Schlagwörter. Einzelne Termine kannst du unten mit „als Urlaub“ direkt übernehmen.</p>
         ${this._calendarList(calendars)}
         <h4>Termine im Zeitraum</h4>
         ${this._homeEvents(home)}
@@ -790,6 +793,7 @@ class DacPanel extends DacBase {
           ${this._fieldNumber("offset_minutes", "Offset vor Arbeitsbeginn", s.offset_minutes, 0, 600, 5, "min")}
           ${this._fieldNumber("loop_interval_minutes", "Weck-Wiederholung", s.loop_interval_minutes, 1, 60, 1, "min")}
           ${this._fieldNumber("max_ring_minutes", "Not-Aus: stoppt selbst nach", s.max_ring_minutes, 0, 600, 5, "min")}
+          ${this._fieldSwitch("turn_off_lights_on_stop", "Licht beim Stoppen ausschalten", s.turn_off_lights_on_stop)}
           ${this._fieldNumber("test_mode_minutes", "Testwecker nach", s.test_mode_minutes, 1, 120, 1, "min")}
           ${this._fieldTime("reminder_time", "Tägliche Erinnerung", s.reminder_time)}
           ${this._fieldText("reminder_text", "Erinnerungstext ({alarm_time})", s.reminder_text, "Denk an die Arbeitszeit!")}
@@ -820,7 +824,10 @@ class DacPanel extends DacBase {
           ${this._entityField("alexa_text_helper", "Helfer: gesetzter Wecker", s.alexa_text_helper)}
           ${this._entityField("alexa_enabled_boolean", "Helfer: Wecker aktiv", s.alexa_enabled_boolean)}
           ${this._fieldNumber("pre_alarm_minutes", "Vorab-Wecker Echo", s.pre_alarm_minutes, 0, 30, 1, "min")}
-          ${this._fieldText("stop_word", "Stopp-Wort (Name des Echo-Weckers)", s.stop_word, "Wecker aus")}
+          ${this._fieldText("alexa_alarm_name", "Wecker-Name auf dem Echo (leer = ohne Namen)", s.alexa_alarm_name, "z. B. Wecker aus")}
+          ${this._fieldText("stop_word", "Stopp-Wort (für die Alexa-Routine)", s.stop_word, "Wecker aus")}
+          ${this._fieldSwitch("reminder_via_alexa", "Erinnerung leise auf dem Echo sprechen", s.reminder_via_alexa)}
+          ${this._fieldNumber("reminder_alexa_volume", "Lautstärke der Echo-Erinnerung", s.reminder_alexa_volume, 1, 100, 1, "%")}
         </div>
       </fieldset>`;
   }
@@ -837,6 +844,7 @@ class DacPanel extends DacBase {
           <li><b>Wecken</b> – Lichter gehen an, der Echo klingelt über seinen eigenen Wecker (kein TTS).</li>
           <li><b>Urlaub</b> – Tage im <button class="linklike" data-page="calendar">Kalender</button> markieren oder HA-Kalender koppeln; DAC weckt dann nicht.</li>
           <li><b>Testen</b> – im Testmodus klingelt die komplette Kette gefahrlos in X Minuten.</li>
+          <li><b>Erinnerung</b> – abends (Standard 21:00) erinnert DAC per Benachrichtigung <i>und</i> leise auf dem Echo, die Arbeitszeit zu setzen.</li>
         </ol>
       </section>
 
@@ -846,7 +854,7 @@ class DacPanel extends DacBase {
         <div class="steps">
           <p>1. Einstellungen → „Echo (Alexa)“ → tippen und Vorschlag anklicken.</p>
           <p>2. Optional die beiden Helfer wählen: <code>input_text</code> (gesetzter Wecker) und <code>input_boolean</code> (Wecker aktiv).</p>
-          <p>3. In der Alexa-App eine Routine <b>„${esc(alexa.routine_name || "DAC Stopp")}“</b> anlegen: Auslöser „Wecker mit dem Namen <b>${esc(alexa.stop_word || "Wecker aus")}</b> klingelt“, Aktion „Smart-Home-Gerät → DAC → Wecker stoppen“.</p>
+          <p>3. Der Wecker wird standardmäßig <b>ohne Namen</b> gestellt – so fragt Alexa nicht nach. Möchtest du per Sprache stoppen, gib oben einen <b>Wecker-Namen</b> ein und lege in der Alexa-App eine Routine <b>„${esc(alexa.routine_name || "DAC Stopp")}“</b> an: Auslöser „Wecker mit dem Namen <b>${esc(alexa.stop_word || "Wecker aus")}</b> klingelt“, Aktion „Smart-Home-Gerät → DAC → Wecker stoppen“.</p>
         </div>
       </section>
 
@@ -1000,6 +1008,7 @@ const STYLES = `
   h3 { margin: 0 0 6px; font-size: 16px; }
   h4 { margin: 12px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .5px; opacity: .6; }
   .badge { background: ${DAC_AMBER}; color: #111; border-radius: 999px; font-size: 11px; padding: 2px 9px; margin-left: 6px; vertical-align: middle; }
+  .badge.ok { background: #0f7b6c; color: #fff; }
   .muted { color: var(--secondary-text-color, #6b7280); font-size: 13px; margin: 0 0 10px; }
   .hint { color: var(--secondary-text-color, #6b7280); font-size: 12px; margin: 6px 0 0; line-height: 1.5; }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

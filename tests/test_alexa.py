@@ -7,12 +7,14 @@ from unittest.mock import patch
 import pytest
 from freezegun import freeze_time
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 
 from custom_components.dac.const import (
     ALEXA_CLEAR_TEXT,
     ALEXA_SET_TEXT,
     CONF_ALEXA_ENABLED,
 )
+from custom_components.dac.coordinator import DacCoordinator
 from custom_components.dac.logic import (
     alexa_clear_text,
     alexa_set_text,
@@ -93,15 +95,19 @@ async def test_bridge_stored_alarm_reads_helper(hass: HomeAssistant, coordinator
 async def test_bridge_sync_places_only_own_alarm(
     hass: HomeAssistant, coordinator, service_calls: list[tuple[str, str, dict]]
 ) -> None:
-    """Sync places today's alarm (with pre-alarm shift) and stores it in the helper."""
+    """Sync places the alarm for the computed wake time and stores it in the helper.
+
+    The wake time is the work start MINUS the offset (06:00 default - 60 min =
+    05:00), minus the 2-minute pre-alarm -> 04:58.
+    """
     coordinator._options[CONF_ALEXA_ENABLED] = True
     coordinator._reschedule_alarm()
     await coordinator.alexa.async_sync()
 
     texts = [data.get("media_content_id", "") for d, s, data in service_calls if s == "play_media"]
-    assert any(t.startswith("stelle einen Wecker auf 05:58 Uhr morgens") for t in texts)
+    assert any(t.startswith("stelle einen Wecker auf 04:58 Uhr morgens") for t in texts)
     helper_writes = [data.get("value") for d, s, data in service_calls if s == "set_value"]
-    assert "05:58" in helper_writes
+    assert "04:58" in helper_writes
 
 
 async def test_bridge_sync_disabled_writes_nothing(
@@ -228,16 +234,37 @@ async def test_command_is_always_custom_text(
 async def test_alarm_name_carries_stop_word(
     hass: HomeAssistant, coordinator, service_calls: list[tuple[str, str, dict]]
 ) -> None:
-    """The Echo alarm is named with the stop word so an Alexa routine can stop DAC."""
-    from custom_components.dac.const import CONF_STOP_WORD
+    """A configured alarm name is passed to Alexa so a routine can stop DAC."""
+    from custom_components.dac.const import CONF_ALEXA_ALARM_NAME
 
     coordinator._options[CONF_ALEXA_ENABLED] = True
-    coordinator._options[CONF_STOP_WORD] = "Wecker aus"
+    coordinator._options[CONF_ALEXA_ALARM_NAME] = "Wecker aus"
     coordinator._alarm_time = time(6, 0)
 
     await coordinator.alexa.async_pre_alarm()
     texts = [data.get("media_content_id", "") for d, s, data in service_calls if s == "play_media"]
     assert texts and "namens Wecker aus" in texts[0]
+
+
+async def test_alarm_is_plain_without_name(
+    hass: HomeAssistant, coordinator, service_calls: list[tuple[str, str, dict]]
+) -> None:
+    """Without a configured name the alarm is placed plain.
+
+    A name makes Alexa ask back or refuse the command on some devices, which is
+    why it is opt-in; the plain command must contain no 'namens'.
+    """
+    from custom_components.dac.const import CONF_ALEXA_ALARM_NAME
+
+    coordinator._options[CONF_ALEXA_ENABLED] = True
+    coordinator._options[CONF_ALEXA_ALARM_NAME] = ""
+    coordinator._alarm_time = time(6, 0)
+
+    await coordinator.alexa.async_pre_alarm()
+    texts = [data.get("media_content_id", "") for d, s, data in service_calls if s == "play_media"]
+    assert texts
+    assert "namens" not in texts[0]
+    assert texts[0].startswith("stelle einen Wecker auf ")
 
 
 async def test_set_gate_turns_helper_on_and_off(
@@ -291,3 +318,81 @@ async def test_service_set_alarm_without_time_syncs(
     await coordinator.alexa.async_set_alarm(FakeCall({}))
 
     assert any(s == "set_value" for d, s, _ in service_calls)
+
+
+@freeze_time("2026-09-06 18:00:00")  # Berlin 20:00
+async def test_bridge_sync_places_alarm_for_tomorrow(
+    hass: HomeAssistant, coordinator, service_calls: list[tuple[str, str, dict]]
+) -> None:
+    """A work time set in the evening targets tomorrow -> the Echo alarm MUST be placed.
+
+    Regression for a live bug: ``async_sync`` only placed the device alarm when
+    the computed alarm day was *today*. A work time set in the evening (the
+    normal case) targets tomorrow, so the Echo alarm was never created at all –
+    the user woke up with no alarm.
+    """
+    from tests.conftest import FakeCall
+
+    coordinator._options[CONF_ALEXA_ENABLED] = True
+    await coordinator.async_set_work_time(FakeCall({"time": "06:45"}))
+    assert coordinator._alarm_day is not None
+    assert coordinator._alarm_day > __import__("homeassistant.util.dt", fromlist=["dt"]).now().date()
+
+    await coordinator.alexa.async_sync()
+
+    texts = [data.get("media_content_id", "") for d, s, data in service_calls if s == "play_media"]
+    assert any(t.startswith("stelle einen Wecker auf ") for t in texts), texts
+
+
+# --------------------------------------------------------------- speak/reminder
+@freeze_time("2026-09-06 19:00:00")
+async def test_speak_uses_alexa_media_notify_and_restores_volume(
+    hass: HomeAssistant, coordinator, service_calls: list[tuple[str, str, dict]]
+) -> None:
+    """The spoken reminder goes to the device notify service and restores volume.
+
+    The Echo is turned down for the reminder and back up afterwards, so a 21:00
+    reminder never blasts the room.
+    """
+    from custom_components.dac.const import CONF_REMINDER_ALEXA_VOLUME
+
+    coordinator._options[CONF_ALEXA_ENABLED] = True
+    coordinator._options[CONF_REMINDER_ALEXA_VOLUME] = 15
+    hass.states.async_set(
+        "media_player.echo", "idle", {"volume_level": 0.4, "friendly_name": "Echo"}
+    )
+    hass.services.async_register("notify", "alexa_media_echo", lambda call: None)
+
+    spoke = await coordinator.alexa.async_speak("Bitte den Wecker stellen.")
+
+    assert spoke is True
+    volumes = [d.get("volume_level") for dom, s, d in service_calls if s == "volume_set"]
+    assert 0.15 in volumes
+    assert any(dom == "notify" and s == "alexa_media_echo" for dom, s, _ in service_calls)
+
+
+async def test_speak_returns_false_without_service(
+    hass: HomeAssistant, coordinator, service_calls: list[tuple[str, str, dict]]
+) -> None:
+    """Without a matching notify service the reminder is skipped silently."""
+    coordinator._options[CONF_ALEXA_ENABLED] = True
+    assert await coordinator.alexa.async_speak("Test") is False
+    assert not [1 for dom, s, _ in service_calls if dom == "notify"]
+
+
+@freeze_time("2026-09-06 19:30:00")
+async def test_reminder_speaks_on_echo_when_enabled(
+    hass: HomeAssistant, coordinator: DacCoordinator, recorded
+) -> None:
+    """The 21:00 reminder is also spoken on the Echo when the option is on."""
+    from custom_components.dac.const import CONF_REMINDER_VIA_ALEXA
+
+    coordinator._options[CONF_ALEXA_ENABLED] = True
+    coordinator._options[CONF_REMINDER_VIA_ALEXA] = True
+    hass.states.async_set("media_player.echo", "idle", {"volume_level": 0.5})
+    hass.services.async_register("notify", "alexa_media_echo", lambda call: None)
+
+    await coordinator._async_reminder_check(dt_util.now())
+
+    notify_calls = [c for c in recorded if c[0] == "notify"]
+    assert any("alexa_media_echo" == c[1] for c in notify_calls)

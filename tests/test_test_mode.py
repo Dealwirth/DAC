@@ -190,8 +190,10 @@ async def test_alexa_alarm_is_labelled_with_stop_word(
     hass: HomeAssistant, coordinator: DacCoordinator
 ) -> None:
     """Every alarm DAC places carries the stop word as its Alexa label."""
+    from custom_components.dac.const import CONF_ALEXA_ALARM_NAME
+
     coordinator._options[CONF_ALEXA_ENABLED] = True
-    coordinator._options[CONF_STOP_WORD] = "Wecker aus"
+    coordinator._options[CONF_ALEXA_ALARM_NAME] = "Wecker aus"
     calls: list[tuple[str, str, dict]] = []
     from unittest.mock import patch
 
@@ -282,7 +284,7 @@ async def test_ringing_alarm_is_not_rescheduled_to_tomorrow(
     assert coordinator._state == "ringing"
 
     # The reminder/scan re-arms while the loop is still running.
-    with freeze_time("2026-09-06 18:30:00"):  # Berlin 20:30, cutoff passed
+    with freeze_time("2026-09-06 19:30:00"):  # Berlin 21:30, cutoff passed
         coordinator._reschedule_alarm()
     assert coordinator._state == "ringing"
     assert coordinator._alarm_target == target_before
@@ -303,10 +305,10 @@ async def test_max_ring_minutes_default_and_bounds(coordinator: DacCoordinator) 
 async def test_stop_turns_alarm_lights_off(
     hass: HomeAssistant, coordinator: DacCoordinator
 ) -> None:
-    """Stopping a ringing alarm switches the lights back off.
+    """By default the lights STAY ON after stopping – the user is awake.
 
-    Regression for the live bug: after "Wecker stoppen" the alarm was idle but
-    the lights stayed on all night.
+    The user asked for the light to remain on once the alarm rings. Only the
+    explicit option switches them back off.
     """
     coordinator._options[CONF_ALARM_LIGHTS] = ["light.1"]
     hass.states.async_set("light.1", "off")
@@ -317,6 +319,25 @@ async def test_stop_turns_alarm_lights_off(
         assert any(c[0] == "light" and c[1] == "turn_on" for c in calls)
         hass.states.async_set("light.1", "on")  # the fire switched it on
         await coordinator.async_stop_alarm(FakeCall({}))
+    assert not any(c[0] == "light" and c[1] == "turn_off" for c in calls)
+
+
+@freeze_time("2026-09-06 05:00:00")
+async def test_stop_turns_alarm_lights_off_when_configured(
+    hass: HomeAssistant, coordinator: DacCoordinator
+) -> None:
+    """With the option enabled, stopping switches the lights off again."""
+    from custom_components.dac.const import CONF_TURN_OFF_LIGHTS_ON_STOP
+
+    coordinator._options[CONF_ALARM_LIGHTS] = ["light.1"]
+    coordinator._options[CONF_TURN_OFF_LIGHTS_ON_STOP] = True
+    hass.states.async_set("light.1", "off")
+    patcher, calls = _record_calls(hass)
+    with patcher:
+        await coordinator.async_set_work_time(FakeCall({"time": "15:00"}))
+        await coordinator._alarm_fired(dt_util.now())
+        hass.states.async_set("light.1", "on")
+        await coordinator.async_stop_alarm(FakeCall({}))
     assert any(c[0] == "light" and c[1] == "turn_off" for c in calls)
 
 
@@ -324,8 +345,11 @@ async def test_stop_turns_alarm_lights_off(
 async def test_safety_cap_turns_alarm_lights_off(
     hass: HomeAssistant, coordinator: DacCoordinator
 ) -> None:
-    """The safety stop also switches the lights off (matches the docs)."""
+    """With the option enabled the safety stop also switches the lights off."""
+    from custom_components.dac.const import CONF_TURN_OFF_LIGHTS_ON_STOP
+
     coordinator._options[CONF_MAX_RING_MINUTES] = 60
+    coordinator._options[CONF_TURN_OFF_LIGHTS_ON_STOP] = True
     coordinator._options[CONF_ALARM_LIGHTS] = ["light.1"]
     hass.states.async_set("light.1", "on")
     patcher, calls = _record_calls(hass)

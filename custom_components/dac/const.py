@@ -26,16 +26,20 @@ CONF_LOOP_INTERVAL_MINUTES: Final = "loop_interval_minutes"    # how often the a
 CONF_MAX_RING_MINUTES: Final = "max_ring_minutes"              # safety stop after N minutes ringing
 CONF_TEST_MODE_MINUTES: Final = "test_mode_minutes"            # test alarm rings in N minutes
 CONF_STOP_WORD: Final = "stop_word"                            # alarm name that stops DAC via Alexa
+CONF_REMINDER_VIA_ALEXA: Final = "reminder_via_alexa"          # speak the reminder on the Echo
+CONF_REMINDER_ALEXA_VOLUME: Final = "reminder_alexa_volume"    # reminder volume (percent)
+CONF_TURN_OFF_LIGHTS_ON_STOP: Final = "turn_off_lights_on_stop"  # lights off when stopping?
+CONF_ALEXA_ALARM_NAME: Final = "alexa_alarm_name"              # optional Echo alarm label ("" = none)
 
 # --- Defaults --------------------------------------------------------------
 DEFAULT_NAME: Final = "DAC"
 DEVICE_NAME: Final = "DAC Wecker"
 DEFAULT_ALARM_TIME: Final = "06:00"
 DEFAULT_OFFSET_MINUTES: Final = 60
-DEFAULT_REMINDER_TIME: Final = "20:30"
+DEFAULT_REMINDER_TIME: Final = "21:00"
 DEFAULT_REMINDER_TEXT: Final = (
-    "⏰ DAC: Für morgen wurde noch keine Arbeitszeit gesetzt. "
-    "Der Standard-Wecker ({alarm_time}) greift, wenn nichts gesetzt wird."
+    "⏰ DAC: Für morgen ist noch keine Arbeitszeit gesetzt – bitte den Wecker stellen. "
+    "Sonst klingelt der Standard-Wecker um {alarm_time} Uhr."
 )
 DEFAULT_VACATION_KEYWORDS: Final = (
     "urlaub",
@@ -50,12 +54,20 @@ DEFAULT_LOOP_INTERVAL_MINUTES: Final = 5
 DEFAULT_MAX_RING_MINUTES: Final = 60
 DEFAULT_TEST_MODE_MINUTES: Final = 1
 DEFAULT_STOP_WORD: Final = "Wecker aus"
+DEFAULT_REMINDER_VIA_ALEXA: Final = True
+DEFAULT_REMINDER_ALEXA_VOLUME: Final = 15
+DEFAULT_TURN_OFF_LIGHTS_ON_STOP: Final = False
+DEFAULT_ALEXA_ALARM_NAME: Final = ""
 DEFAULT_VACATION_SCAN_TIME: Final = "00:01"
 
 # Loop interval bounds (a too-short interval would spam the Echo).
 MIN_LOOP_INTERVAL_MINUTES: Final = 1
 MAX_LOOP_INTERVAL_MINUTES: Final = 60
 MAX_TEST_MODE_MINUTES: Final = 120
+
+# Reminder volume bounds (percent of the Echo's max volume).
+MIN_REMINDER_VOLUME: Final = 1
+MAX_REMINDER_VOLUME: Final = 100
 
 # Safety stop: an alarm that is never stopped ends itself after this many
 # minutes (0 disables the limit and rings until stopped manually).
@@ -106,7 +118,11 @@ ALEXA_CLEAR_TEXT: Final = "lösche den Wecker um {time} Uhr"
 # DAC names every alarm it places with the stop word. An Alexa routine whose
 # trigger is "an alarm with this name rings" can then call dac.stop_alarm, so
 # stopping by voice needs no custom skill and no cloud hook.
-ALEXA_STOP_ALARM_TEXT: Final = "stelle einen Wecker auf {time} Uhr {tod} namens {label}"
+ALEXA_SET_NAMED_TEXT: Final = "stelle einen Wecker auf {time} Uhr {tod} namens {label}"
+ALEXA_SET_PLAIN_TEXT: Final = "stelle einen Wecker auf {time} Uhr {tod}"
+# Backwards-compatible alias (older code/tests referenced this name).
+ALEXA_STOP_ALARM_TEXT: Final = ALEXA_SET_NAMED_TEXT
+ALEXA_SPEAK_TEXT: Final = "sag: {text}"
 ALEXA_ROUTINE_NAME: Final = "DAC Stopp"
 
 # --- Services (Alexa) -------------------------------------------------------

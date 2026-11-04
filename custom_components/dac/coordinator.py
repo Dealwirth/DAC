@@ -35,11 +35,15 @@ from .const import (
     CONF_OFFSET,
     CONF_REMINDER_TEXT,
     CONF_REMINDER_TIME,
+    CONF_REMINDER_VIA_ALEXA,
     CONF_TEST_MODE_MINUTES,
+    CONF_TURN_OFF_LIGHTS_ON_STOP,
     CONF_VACATION_CALENDARS,
     DEFAULT_LOOP_INTERVAL_MINUTES,
     DEFAULT_MAX_RING_MINUTES,
     DEFAULT_REMINDER_TEXT,
+    DEFAULT_REMINDER_VIA_ALEXA,
+    DEFAULT_TURN_OFF_LIGHTS_ON_STOP,
     DEFAULT_VACATION_SCAN_TIME,
     DOMAIN,
     MAX_LOOP_INTERVAL_MINUTES,
@@ -226,6 +230,24 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return max(MIN_LOOP_INTERVAL_MINUTES, min(MAX_LOOP_INTERVAL_MINUTES, value))
 
     @property
+    def turn_off_lights_on_stop(self) -> bool:
+        """Whether the alarm lights go off when the alarm is stopped.
+
+        Default False: stopping means the user is awake and wants the light to
+        stay on. True restores the old "light off on stop" behaviour.
+        """
+        return bool(
+            self._options.get(CONF_TURN_OFF_LIGHTS_ON_STOP, DEFAULT_TURN_OFF_LIGHTS_ON_STOP)
+        )
+
+    @property
+    def reminder_via_alexa(self) -> bool:
+        """Whether the daily reminder is also spoken on the Echo."""
+        return bool(
+            self._options.get(CONF_REMINDER_VIA_ALEXA, DEFAULT_REMINDER_VIA_ALEXA)
+        )
+
+    @property
     def max_ring_minutes(self) -> int:
         """Safety cap: end the alarm automatically after N minutes (0 = off)."""
         try:
@@ -342,8 +364,11 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             else:
                 self._stopped_days.add(dt_util.now().date())
                 await self._async_stop_loop(set_state=STATE_STOPPED)
-            # Stopping the alarm means getting up: the lights go off again.
-            await self._async_turn_off_lights()
+            # By default the lights stay on after the alarm is stopped (the
+            # user is awake and wants light). Only switch them off when the
+            # option asks for it.
+            if self.turn_off_lights_on_stop:
+                await self._async_turn_off_lights()
         else:
             await self._async_stop_loop()
         if was_ringing:
@@ -582,6 +607,9 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         except HomeAssistantError as err:
             _LOGGER.warning("DAC reminder via %s failed: %s", notifier, err)
+        # Additionally (or only) speak the reminder quietly on the Echo.
+        if self.reminder_via_alexa:
+            await self.alexa.async_speak(_spoken_reminder(message))
 
     # --------------------------------------------------------- alarm runtime
     @callback
@@ -810,3 +838,14 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 def _split_time(value: str | time) -> tuple[int, int]:
     t = parse_time_str(value)
     return t.hour, t.minute
+
+
+def _spoken_reminder(message: str) -> str:
+    """Turn the reminder text into a short, speakable sentence.
+
+    Emoji and the leading "DAC:" prefix would be read out loud by Alexa, so
+    they are stripped for the spoken version.
+    """
+    text = message.replace("⏰", " ").replace("DAC:", " ").replace("DAC", " ")
+    text = " ".join(text.split())
+    return text or "Bitte den Wecker für morgen stellen."

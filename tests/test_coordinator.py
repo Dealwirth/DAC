@@ -65,7 +65,7 @@ async def test_manual_work_time_schedules_alarm_with_offset(
 async def test_evening_scan_targets_tomorrow(
     hass: HomeAssistant, coordinator: DacCoordinator
 ):
-    """A scan at 21:00 (after cutoff 20:30) is for the next day."""
+    """A scan at 21:00 (at the cutoff) is for the next day."""
     await coordinator.async_set_work_time(_fake_call({"time": "08:00"}))
 
     assert coordinator._work_time_day == dt_util.now().date() + timedelta(days=1)
@@ -79,7 +79,7 @@ async def test_default_fallback_used_without_work_time(
     hass: HomeAssistant, coordinator: DacCoordinator
 ):
     """No manual time, cutoff later -> default alarm 06:00 tomorrow? No:
-    today's 06:00 default already passed and cutoff (20:30) not reached,
+    today's 06:00 default already passed and cutoff (21:00) not reached,
     so nothing is scheduled (awaiting input)."""
     coordinator._reschedule_alarm()
 
@@ -316,11 +316,11 @@ async def test_vacation_check_suppresses_alarm(
 # ---------------------------------------------------------------------------
 
 
-@freeze_time("2026-09-06 18:30:00")
+@freeze_time("2026-09-06 19:30:00")
 async def test_reminder_sent_when_no_work_time(
     hass: HomeAssistant, coordinator: DacCoordinator, recorded
 ):
-    """At 20:30 with nothing set for tomorrow -> reminder via notify.test."""
+    """At 21:00 with nothing set for tomorrow -> reminder via notify.test."""
     await coordinator._async_reminder_check(dt_util.now())
 
     notify_calls = [c for c in recorded if c[0] == "notify"]
@@ -330,7 +330,7 @@ async def test_reminder_sent_when_no_work_time(
     assert "Standard-Wecker" in data["message"] or "DAC" in data["message"]
 
 
-@freeze_time("2026-09-06 18:30:00")
+@freeze_time("2026-09-06 19:30:00")
 async def test_reminder_not_sent_when_work_time_set(
     hass: HomeAssistant, coordinator: DacCoordinator, recorded
 ):
@@ -365,7 +365,7 @@ async def test_early_shift_wraps_before_work_day(
     assert coordinator._alarm_day == target_local.date()
 
 
-@freeze_time("2026-09-06 18:30:00")  # Berlin 20:30 = cutoff
+@freeze_time("2026-09-06 19:30:00")  # Berlin 21:30 = cutoff
 async def test_cutoff_commits_fallback_alarm(
     hass: HomeAssistant, coordinator: DacCoordinator, recorded
 ):

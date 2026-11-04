@@ -28,6 +28,7 @@ from homeassistant.helpers.selector import (
 
 from .const import (
     CONF_ALARM_LIGHTS,
+    CONF_ALEXA_ALARM_NAME,
     CONF_ALEXA_ENABLED,
     CONF_ALEXA_ENABLED_BOOLEAN,
     CONF_ALEXA_MEDIA_PLAYER,
@@ -38,13 +39,17 @@ from .const import (
     CONF_NOTIFIER,
     CONF_OFFSET,
     CONF_PRE_ALARM_MINUTES,
+    CONF_REMINDER_ALEXA_VOLUME,
     CONF_REMINDER_TEXT,
     CONF_REMINDER_TIME,
+    CONF_REMINDER_VIA_ALEXA,
     CONF_STOP_WORD,
     CONF_TEST_MODE_MINUTES,
+    CONF_TURN_OFF_LIGHTS_ON_STOP,
     CONF_VACATION_CALENDARS,
     CONF_VACATION_KEYWORDS,
     DEFAULT_ALARM_TIME,
+    DEFAULT_ALEXA_ALARM_NAME,
     DEFAULT_ALEXA_ENABLED,
     DEFAULT_ALEXA_ENABLED_BOOLEAN,
     DEFAULT_ALEXA_TEXT_HELPER,
@@ -52,29 +57,36 @@ from .const import (
     DEFAULT_MAX_RING_MINUTES,
     DEFAULT_OFFSET_MINUTES,
     DEFAULT_PRE_ALARM_MINUTES,
+    DEFAULT_REMINDER_ALEXA_VOLUME,
     DEFAULT_REMINDER_TEXT,
     DEFAULT_REMINDER_TIME,
+    DEFAULT_REMINDER_VIA_ALEXA,
     DEFAULT_STOP_WORD,
     DEFAULT_TEST_MODE_MINUTES,
+    DEFAULT_TURN_OFF_LIGHTS_ON_STOP,
     DEFAULT_VACATION_KEYWORDS,
     MAX_LOOP_INTERVAL_MINUTES,
     MAX_MAX_RING_MINUTES,
+    MAX_REMINDER_VOLUME,
     MAX_TEST_MODE_MINUTES,
     MIN_LOOP_INTERVAL_MINUTES,
+    MIN_REMINDER_VOLUME,
 )
 
 TIME_KEYS = (CONF_DEFAULT_ALARM_TIME, CONF_REMINDER_TIME)
 INT_KEYS = (
     CONF_OFFSET,
+    CONF_REMINDER_ALEXA_VOLUME,
     CONF_PRE_ALARM_MINUTES,
     CONF_LOOP_INTERVAL_MINUTES,
     CONF_MAX_RING_MINUTES,
     CONF_TEST_MODE_MINUTES,
 )
-BOOL_KEYS = (CONF_ALEXA_ENABLED,)
+BOOL_KEYS = (CONF_ALEXA_ENABLED, CONF_REMINDER_VIA_ALEXA, CONF_TURN_OFF_LIGHTS_ON_STOP)
 LIST_KEYS = (CONF_ALARM_LIGHTS, CONF_VACATION_CALENDARS)
 STR_KEYS = (
     CONF_REMINDER_TEXT,
+    CONF_ALEXA_ALARM_NAME,
     CONF_NOTIFIER,
     CONF_ALEXA_MEDIA_PLAYER,
     CONF_ALEXA_TEXT_HELPER,
@@ -95,6 +107,7 @@ EDITABLE_KEYS: tuple[str, ...] = (
 # Fallbacks and hard bounds for the integer options.
 _INT_DEFAULTS: dict[str, int] = {
     CONF_OFFSET: DEFAULT_OFFSET_MINUTES,
+    CONF_REMINDER_ALEXA_VOLUME: DEFAULT_REMINDER_ALEXA_VOLUME,
     CONF_PRE_ALARM_MINUTES: DEFAULT_PRE_ALARM_MINUTES,
     CONF_LOOP_INTERVAL_MINUTES: DEFAULT_LOOP_INTERVAL_MINUTES,
     CONF_MAX_RING_MINUTES: DEFAULT_MAX_RING_MINUTES,
@@ -102,6 +115,7 @@ _INT_DEFAULTS: dict[str, int] = {
 }
 _INT_BOUNDS: dict[str, tuple[int, int]] = {
     CONF_OFFSET: (0, 600),
+    CONF_REMINDER_ALEXA_VOLUME: (MIN_REMINDER_VOLUME, MAX_REMINDER_VOLUME),
     CONF_PRE_ALARM_MINUTES: (0, 30),
     CONF_LOOP_INTERVAL_MINUTES: (MIN_LOOP_INTERVAL_MINUTES, MAX_LOOP_INTERVAL_MINUTES),
     CONF_MAX_RING_MINUTES: (0, MAX_MAX_RING_MINUTES),
@@ -128,6 +142,10 @@ def default_options() -> dict[str, Any]:
         CONF_MAX_RING_MINUTES: DEFAULT_MAX_RING_MINUTES,
         CONF_TEST_MODE_MINUTES: DEFAULT_TEST_MODE_MINUTES,
         CONF_STOP_WORD: DEFAULT_STOP_WORD,
+        CONF_ALEXA_ALARM_NAME: DEFAULT_ALEXA_ALARM_NAME,
+        CONF_REMINDER_VIA_ALEXA: DEFAULT_REMINDER_VIA_ALEXA,
+        CONF_REMINDER_ALEXA_VOLUME: DEFAULT_REMINDER_ALEXA_VOLUME,
+        CONF_TURN_OFF_LIGHTS_ON_STOP: DEFAULT_TURN_OFF_LIGHTS_ON_STOP,
         CONF_VACATION_KEYWORDS: ", ".join(DEFAULT_VACATION_KEYWORDS),
     }
 
@@ -305,6 +323,30 @@ def build_settings_schema(hass: Any, defaults: dict[str, Any]) -> vol.Schema:
                 CONF_STOP_WORD,
                 default=defaults.get(CONF_STOP_WORD, DEFAULT_STOP_WORD),
             ): TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT)),
+            vol.Optional(
+                CONF_ALEXA_ALARM_NAME,
+                default=defaults.get(CONF_ALEXA_ALARM_NAME, DEFAULT_ALEXA_ALARM_NAME),
+            ): TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT)),
+            vol.Optional(
+                CONF_REMINDER_VIA_ALEXA,
+                description={"suggested_value": defaults.get(CONF_REMINDER_VIA_ALEXA, False)},
+            ): BooleanSelector(),
+            vol.Optional(
+                CONF_REMINDER_ALEXA_VOLUME,
+                default=defaults.get(CONF_REMINDER_ALEXA_VOLUME, DEFAULT_REMINDER_ALEXA_VOLUME),
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=MIN_REMINDER_VOLUME,
+                    max=MAX_REMINDER_VOLUME,
+                    step=1,
+                    unit_of_measurement="%",
+                    mode=NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Optional(
+                CONF_TURN_OFF_LIGHTS_ON_STOP,
+                description={"suggested_value": defaults.get(CONF_TURN_OFF_LIGHTS_ON_STOP, False)},
+            ): BooleanSelector(),
             vol.Optional(
                 CONF_VACATION_KEYWORDS,
                 default=defaults.get(CONF_VACATION_KEYWORDS, ", ".join(DEFAULT_VACATION_KEYWORDS)),

@@ -14,16 +14,16 @@ und erinnert dich abends, wenn du vergessen hast, deine Arbeitszeit zu setzen.
 | Feature | Beschreibung |
 |---|---|
 | **Dynamischer Wecker** | Arbeitsbeginn setzen (NFC, Dashboard, Dienst oder Entität) → Weckzeit = Arbeitsbeginn − Offset |
-| **Weck-Loop** | Licht an + neuer Echo-Wecker im einstellbaren Intervall (1–60 min, Standard 5), bis explizit gestoppt (Home Assistant, Panel oder Alexa) – beim Stopp geht das Licht wieder aus |
-| **Not-Aus** | Klingelt der Wecker zu lange, stoppt er sich selbst nach N Minuten (einstellbar, 0 = unbegrenzt) – Licht geht dabei aus |
+| **Weck-Loop** | Licht an + neuer Echo-Wecker im einstellbaren Intervall (1–60 min, Standard 5), bis explizit gestoppt (Home Assistant, Panel oder Alexa). Das Licht **bleibt an**, wenn der Wecker klingelt (optional abschaltbar) |
+| **Not-Aus** | Klingelt der Wecker zu lange, stoppt er sich selbst nach N Minuten (einstellbar, 0 = unbegrenzt) |
 | **Fallback-Weckzeit** | Wurde nichts gesetzt, greift eine konfigurierbare Standard-Weckzeit (z. B. 06:00) – mit intelligenter Cutoff-Logik |
 | **Urlaub & Feiertage** | Täglicher Scan (00:01) gegen einen eigenen Urlaubskalender und/oder externe Kalender; Keywords wie *Urlaub, Feiertag, Ferien, vacation, holiday* |
-| **Reminder** | Tägliche Erinnerung (z. B. 20:30) via frei wählbarem `notify.*`-Dienst, wenn für morgen noch keine Arbeitszeit gesetzt wurde |
+| **Reminder** | Tägliche Erinnerung (Standard 21:00) via `notify.*` **und** – optional – leise als Ansage auf dem Echo, wenn für morgen noch keine Arbeitszeit gesetzt wurde |
 | **Ein Dashboard, mehrere Seiten** | Ein Sidebar-Eintrag „DAC“ (`/dac`) mit den Seiten **Home**, **Kalender**, **Einstellungen** und **Hilfe** – kein Einrichtungsassistent nötig |
 | **Einfache Zeitwahl** | Native Zeitauswahl (`<input type="time">`) plus Schnellwahl-Chips – kein Zifferblatt-Rad, kein manuelles Tippen von `HH:MM` |
 | **Echter Monatskalender** | Urlaubstage bequem im Monatsraster markieren (Einzel- und Bereichsauswahl per Shift-Klick), eigene und erkannte Tage auf einen Blick |
 | **Kalender-Kopplung** | Die Kalender-Seite zeigt alle Home-Assistant-Kalender und deren Termine; ein Termin lässt sich mit einem Klick als DAC-Urlaubstag übernehmen |
-| **Alexa-Geräte-Wecker** | Optional: echter Wecker auf dem Echo – Textbefehl mit „morgens"/„abends" (keine Rückfragen), gezieltes Löschen nur des DAC-eigenen Weckers, Vorab-Wecker im Weck-Loop |
+| **Alexa-Geräte-Wecker** | Optional: echter Wecker auf dem Echo – Textbefehl mit „morgens"/„abends" (keine Rückfragen), **wird auch für den nächsten Tag gestellt**, gezieltes Löschen nur des DAC-eigenen Weckers, Vorab-Wecker im Weck-Loop. Optional mit Namen (für Sprach-Stopp) |
 | **Keine Ansagen** | DAC spielt **kein TTS** ab: Der Echo klingelt über seinen eigenen Wecker, Home Assistant schaltet nur das Licht – wie in der klassischen YAML-Automation |
 | **Live-Entitäten-Suche** | Jedes Entitätsfeld **ist** ein Suchfeld: Tippen filtert sofort über Name, Entity-ID und **Bereich (Area)** – passende Domains zuerst, „auch gefunden" danach. So findest du deinen Echo, ohne den genauen Namen zu kennen |
 | **Testmodus** | Direkt in die Home-Seite integriert: einmaliger Testwecker in X Minuten – gleiche Kette (Licht, Echo, Wiederholung), gleicher Stopp |
@@ -107,7 +107,7 @@ bietet dieselben Felder.
 | Offset (Minuten) | `60` | So lange vor Arbeitsbeginn wird geweckt |
 | Weck-Wiederholung | `5` min | Alle so viele Minuten (1–60) wird erneut geweckt, bis gestoppt wird |
 | Testwecker nach | `1` min | Vorbelegung für den Testmodus (klingelt in X Minuten) |
-| Reminder-Uhrzeit | `20:30` | Täglicher Status-Check |
+| Reminder-Uhrzeit | `21:00` | Täglicher Status-Check |
 | Reminder-Text | „⏰ DAC: …" | `{alarm_time}` wird durch die Standard-Weckzeit ersetzt |
 | Urlaubs-Schlagwörter | `urlaub, urlaubstag, feiertag, ferien, freizeitausgleich, vacation, holiday` | Wörter, die einen Kalendertag als Urlaub/Feiertag markieren |
 | Weck-Lichter | – | `light.*`-Entitäten, die beim Wecken angehen |
@@ -118,6 +118,10 @@ bietet dieselben Felder.
 | input_text-Helfer | `input_text.gestellter_alexa_wecker` | Speichert den von DAC gesetzten Echo-Wecker |
 | input_boolean-Helfer | `input_boolean.wecker_aktiv` | Gate für den Vorab-Wecker im Weck-Loop (DAC schaltet ihn selbst) |
 | Vorab-Wecker | `2` min | Der Echo-Wecker klingelt so viele Minuten vor der Weckzeit |
+| Echo-Name des Weckers | – | Optional; leer = ohne Namen (Alexa fragt dann nicht nach) |
+| Erinnerung auf dem Echo | an | Erinnerung zusätzlich leise auf dem Echo sprechen |
+| Lautstärke der Erinnerung | `15` % | So laut spricht der Echo die Erinnerung (danach wird die Lautstärke zurückgesetzt) |
+| Licht beim Stoppen aus | aus | Standard: Licht **bleibt an**, wenn der Wecker gestoppt wird |
 | Stopp-Wort | `Wecker aus` | Name der Echo-Wecker; Auslöser für die Alexa-Stopp-Routine |
 
 ### Fallback-/Cutoff-Logik
@@ -266,10 +270,10 @@ py -m venv .venv
 .venv/Scripts/python -m pytest tests -v
 ```
 
-131 Tests decken die komplette Weck-Logik ab: Offset-Berechnung, Mitternachts-Wrap,
+137 Tests decken die komplette Weck-Logik ab: Offset-Berechnung, Mitternachts-Wrap,
 Fallback-/Cutoff-Semantik inkl. Oversleep-Schutz, Weck-Loop mit einstellbarem
 Intervall, Testmodus (Armen/Klingeln/Abbruch/Stopp), Dismiss, Vacation-Check,
-Reminder, Persistenz, Alexa-Bridge (morgens/abends, echter Geräte-Wecker ohne TTS,
+Reminder, Persistenz, Alexa-Bridge (morgens/abends, echter Geräte-Wecker, Stellung auch für morgen,
 gezieltes Löschen, Vorab-Wecker, Gate-Steuerung, Stopp-Wort), Options-Schema und
 -Normalisierung, HTTP-API (Panel-Aktionen inkl. Testmodus, durchsuchbare
 Entitäts-Liste mit Bereich/Echo-Markierung, Kalender-Liste und -Import,

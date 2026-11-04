@@ -6,7 +6,7 @@ Repo: https://github.com/Dealwirth/DAC
 
 ## Umgebung
 - Python 3.13, Home Assistant 2026.2.3 (Test-Matrix in `.github/workflows/ci.yml`).
-- Tests: `python -m pytest tests -q` (131 Tests). Konfiguration in `pytest.ini`.
+- Tests: `python -m pytest tests -q` (137 Tests). Konfiguration in `pytest.ini`.
 - Lint: `python -m ruff check custom_components tests`.
 - JS-Syntaxcheck: `node --check custom_components/dac/www/dac-panel.js`.
 
@@ -55,6 +55,21 @@ Repo: https://github.com/Dealwirth/DAC
   aus) und `_reschedule_alarm` lehnt eine Neuplanung ab, solange der Wecker
   klingelt (`_state == STATE_RINGING`) – so kann kein „ringing" mit
   morgigem Ziel entstehen.
+- **Echo-Wecker für morgen (wichtig, live verifiziert)**: `AlexaBridge.async_sync`
+  stellt den Geräte-Wecker über `_desired_alarm_text()` für den *nächsten*
+  Wecker – **heute oder morgen**. Eine abends gesetzte Arbeitszeit zielt auf den
+  nächsten Morgen; die frühere Beschränkung auf „heute" löschte den Wecker sogar
+  und stellte keinen neuen → der Nutzer wurde nie geweckt.
+- **Wecker-Name ist optional** (`CONF_ALEXA_ALARM_NAME`, Standard leer = ohne
+  Namen). Ein Name kann Alexa zu Rückfragen/Verweigerung bringen, daher opt-in;
+  nur mit Namen ist Sprach-Stopp per Routine möglich.
+- **Licht bleibt beim Stoppen an** (Standard). Nur mit
+  `CONF_TURN_OFF_LIGHTS_ON_STOP=true` schaltet `dac.stop_alarm` (und der Not-Aus)
+  die Lichter aus.
+- **Echo-Erinnerung**: `AlexaBridge.async_speak()` spricht die Reminder-Nachricht
+  über `notify.alexa_media_<objekt>` (Fallback `notify.alexa_media`), senkt vorher
+  die Lautstärke (`CONF_REMINDER_ALEXA_VOLUME`) und stellt sie nach ~12 s wieder
+  her. Standard-Reminderzeit ist 21:00.
 - **Aufräumen nach dem Wecken (wichtig, live verifiziert)**:
   - `dac.stop_alarm` schaltet die Weck-Lichter aus (`_async_turn_off_lights`)
     und beendet den Loop – auch der Not-Aus nutzt diesen Pfad.
@@ -62,6 +77,7 @@ Repo: https://github.com/Dealwirth/DAC
     (`AlexaBridge.async_clear_pre_alarm`, gemerkt in `_pre_alarm`); er steht
     NICHT im `input_text`-Helper. Ohne dieses Löschen klingelt der Echo nach
     „Wecker stoppen" Minuten später trotzdem.
+  - Das Licht bleibt beim Stoppen standardmäßig **an** (Option).
   - Ein gestoppter **Testwecker** setzt `STATE_IDLE` (nicht `STATE_STOPPED`) und
     trägt sich nicht in `_stopped_days` ein – sonst verwirft
     `_reschedule_alarm` die echte Arbeitszeit und der nächste Wecker fällt auf

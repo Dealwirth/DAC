@@ -17,7 +17,7 @@
         "data": {
           "default_alarm_time": "Standard-Weckzeit (Fallback, wenn keine Arbeitszeit gesetzt wurde)",
           "offset_minutes": "Offset: Minuten VOR dem Arbeitsbeginn geweckt werden",
-          "reminder_time": "Tägliche Erinnerung um (Status-Check, ob Arbeitszeit gesetzt wurde)",
+          "reminder_time": "Tägliche Erinnerung um (Status-Check + leise Ansage auf dem Echo)",
           "reminder_text": "Erinnerungstext ({alarm_time} wird ersetzt)",
           "notifier": "Ziel-Benachrichtigungsdienst (notify.*)",
           "alarm_lights": "Weck-Lichter (optional)",
@@ -31,7 +31,11 @@
           "loop_interval_minutes": "Weck-Wiederholung: alle N Minuten wiederholen, bis gestoppt wird (1-60)",
           "max_ring_minutes": "Not-Aus: Wecker nach N Minuten automatisch stoppen (0 = bis zum manuellen Stopp klingeln)",
           "test_mode_minutes": "Testmodus: Testwecker klingelt nach N Minuten",
-          "stop_word": "Stopp-Wort: Name des Echo-Weckers, der DAC per Alexa-Routine stoppt"
+          "stop_word": "Stopp-Wort: Name des Echo-Weckers, der DAC per Alexa-Routine stoppt",
+          "reminder_via_alexa": "Erinnerung zusätzlich leise auf dem Echo sprechen",
+          "reminder_alexa_volume": "Lautstärke der Echo-Erinnerung (%)",
+          "alexa_alarm_name": "Name des Echo-Weckers (leer = ohne Namen, Alexa fragt dann nicht nach)",
+          "turn_off_lights_on_stop": "Licht beim Stoppen ausschalten (Standard: Licht bleibt an)"
         }
       }
     }
