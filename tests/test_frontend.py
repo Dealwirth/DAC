@@ -33,7 +33,7 @@ async def test_dashboard_registered_in_sidebar(hass: HomeAssistant) -> None:
     call = register.await_args_list[0].kwargs
     assert call["frontend_url_path"] == PANEL_URL_PATH
     assert call["webcomponent_name"] == PANEL_ELEMENT
-    assert call["module_url"] == PANEL_MODULE_PATH
+    assert call["module_url"].startswith(PANEL_MODULE_PATH)  # ?v=<version>
     assert call["embed_iframe"] is False
 
 
@@ -217,3 +217,25 @@ def test_panel_js_single_field_keeps_current_value() -> None:
     js = PANEL_JS.read_text(encoding="utf-8")
     assert "const multi = this._isMulti(key);" in js
     assert 'chip.suggest.current' in js
+
+
+def test_panel_module_url_is_cache_busted() -> None:
+    """The panel module URL carries the version so updates are not cached."""
+    from custom_components.dac.const import VERSION
+
+    src = (PANEL_JS.parents[1] / "frontend.py").read_text(encoding="utf-8")
+    assert "module_url=f\"{PANEL_MODULE_PATH}?v={VERSION}\"" in src
+    assert VERSION
+
+
+def test_version_is_consistent_everywhere() -> None:
+    """const.VERSION, manifest.json and the panel JS must all agree."""
+    import json
+
+    from custom_components.dac.const import VERSION
+
+    root = PANEL_JS.parents[1]
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    js = PANEL_JS.read_text(encoding="utf-8")
+    assert manifest["version"] == VERSION
+    assert f'const DAC_VERSION = "{VERSION}";' in js
