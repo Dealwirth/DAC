@@ -77,3 +77,30 @@ def test_build_settings_schema_covers_all_editable_keys(hass: HomeAssistant) -> 
     schema = build_settings_schema(hass, default_options())
     keys = {str(key) for key in schema.schema}
     assert keys == set(EDITABLE_KEYS)
+
+
+def test_new_alexa_and_reminder_defaults() -> None:
+    """The new v0.8 options ship with sensible defaults."""
+    defaults = default_options()
+    assert defaults["reminder_time"] == "21:00"
+    assert defaults["reminder_via_alexa"] is True   # quiet evening reminder on by default
+    assert defaults["reminder_alexa_volume"] == 15
+    assert defaults["alexa_alarm_name"] == ""       # plain alarm unless a name is set
+    assert defaults["turn_off_lights_on_stop"] is False  # light stays on by default
+
+
+def test_coerce_new_options_are_bounded() -> None:
+    """The reminder volume is clamped and the new switches are coerced."""
+    result = coerce_options(
+        {
+            "reminder_alexa_volume": 250,
+            "reminder_via_alexa": "ja",
+            "turn_off_lights_on_stop": "on",
+            "alexa_alarm_name": "Wecker aus",
+        },
+        default_options(),
+    )
+    assert result["reminder_alexa_volume"] == 100
+    assert result["reminder_via_alexa"] is True
+    assert result["turn_off_lights_on_stop"] is True
+    assert result["alexa_alarm_name"] == "Wecker aus"
