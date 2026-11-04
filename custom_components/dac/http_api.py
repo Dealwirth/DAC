@@ -22,10 +22,21 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_platform as ep
 from homeassistant.util import dt as dt_util
 
-from .const import ALEXA_ROUTINE_NAME, DOMAIN, ENTITY_SEARCH_EXCLUDE_DOMAINS
+from .const import (
+    ALEXA_ROUTINE_NAME,
+    CONF_VACATION_CALENDARS,
+    DOMAIN,
+    ENTITY_SEARCH_EXCLUDE_DOMAINS,
+)
 from .coordinator import DacCoordinator
 from .logic import event_marks_vacation
-from .settings import EDITABLE_KEYS, coerce_options, default_options, vacation_keywords
+from .settings import (
+    EDITABLE_KEYS,
+    _notify_services,
+    coerce_options,
+    default_options,
+    vacation_keywords,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -92,6 +103,8 @@ class DacApiView(HomeAssistantView):
                 await _remove_vacation(hass, body)
             elif action == "clear_vacations":
                 await _clear_vacations(hass)
+            elif action == "import_vacation":
+                await _import_vacation(hass, coordinator, body)
             else:
                 return self.json_message(f"unknown action: {action}", 400)
         except (HomeAssistantError, ValueError) as err:
@@ -173,6 +186,37 @@ async def _clear_vacations(hass: HomeAssistant) -> None:
         uid = event.get("uid")
         if uid:
             await entity.async_delete_event(uid)
+
+
+async def _import_vacation(hass: HomeAssistant, coordinator: DacCoordinator, body: dict) -> None:
+    """Copy a day from a Home Assistant calendar into the DAC vacation calendar.
+
+    This is what couples the DAC calendar with the normal HA calendars: the
+    user picks an event on the calendar page and DAC stores it as its own
+    (deletable) all-day vacation day.
+    """
+    source = str(body.get("source") or "").strip()
+    if not source:
+        raise HomeAssistantError("Bitte einen Kalender wählen")
+    day = _parse_date(body.get("date"))
+    if day is None:
+        raise HomeAssistantError("Bitte ein gültiges Datum wählen")
+
+    summary = str(body.get("summary") or "").strip() or "Urlaub"
+    existing = {item["date"] for item in await _own_vacation_days(hass, _first_calendar(hass), day, day)}
+    if day.isoformat() in existing:
+        return  # already a DAC vacation day – nothing to do
+
+    entity_id = _first_calendar(hass)
+    entity = _lookup_entity(hass, entity_id) if entity_id else None
+    if entity is None or not hasattr(entity, "async_create_event"):
+        raise HomeAssistantError("Urlaubskalender nicht verfügbar")
+    await entity.async_create_event(
+        dtstart=day,
+        dtend=day + timedelta(days=1),
+        summary=summary,
+        description=f"Importiert aus {source}",
+    )
 
 
 def _range_days(start: Any, end: Any) -> list[date]:
@@ -277,17 +321,45 @@ async def _entry_payload(hass: HomeAssistant, coordinator: DacCoordinator) -> di
         "settings": _settings_payload(options),
         "alexa": _alexa_payload(coordinator),
         "calendar": calendar,
+        "calendars": _available_calendars(hass, coordinator),
         "entities": _entity_suggestions(hass),
+        "notify_services": _notify_services(hass),
     }
+
+
+def _available_calendars(hass: HomeAssistant, coordinator: DacCoordinator) -> list[dict[str, Any]]:
+    """Every calendar entity with a flag for the DAC/vacation role.
+
+    The calendar page shows this list so the user can pick which Home Assistant
+    calendar DAC should watch for vacation days.
+    """
+    own = _first_calendar(hass)
+    vacation = set(coordinator.options.get(CONF_VACATION_CALENDARS) or [])
+    items: list[dict[str, Any]] = []
+    for state in hass.states.async_all("calendar"):
+        entity_id = state.entity_id
+        name = state.attributes.get("friendly_name") or entity_id
+        items.append(
+            {
+                "id": entity_id,
+                "name": str(name),
+                "is_own": entity_id == own,
+                "is_vacation": entity_id in vacation,
+            }
+        )
+    return sorted(items, key=lambda item: item["id"])
 
 
 def _entity_suggestions(hass: HomeAssistant) -> list[dict[str, str]]:
     """Every entity the panel may suggest, as one flat searchable list.
 
     The panel renders a search box plus suggestions per field and filters this
-    list locally by domain and by the typed text, so a single list is enough.
-    Only noisy internal domains are skipped.
+    list locally, so a single list is enough. Only noisy internal domains are
+    skipped. Each item also carries its area name (when assigned) and whether it
+    looks like an Alexa device, so the picker can search by room and highlight
+    Echo players first.
     """
+    areas = _entity_areas(hass)
     items: list[dict[str, str]] = []
     for state in hass.states.async_all():
         entity_id = state.entity_id
@@ -295,8 +367,53 @@ def _entity_suggestions(hass: HomeAssistant) -> list[dict[str, str]]:
         if domain in ENTITY_SEARCH_EXCLUDE_DOMAINS:
             continue
         name = state.attributes.get("friendly_name") or entity_id
-        items.append({"id": entity_id, "name": str(name), "domain": domain})
+        area = areas.get(entity_id, "")
+        items.append(
+            {
+                "id": entity_id,
+                "name": str(name),
+                "domain": domain,
+                "area": area,
+                "alexa": _looks_like_alexa(entity_id, str(name)),
+            }
+        )
     return sorted(items, key=lambda item: (item["domain"], item["id"]))
+
+
+def _looks_like_alexa(entity_id: str, name: str) -> bool:
+    """Heuristic: is this the kind of entity an Echo shows up as?
+
+    alexa_media names its players after the device ("Echo Küche", "Alexa Büro"),
+    so matching those two words covers every Echo/Dot/Show without flagging
+    unrelated speakers like "Sonos".
+    """
+    haystack = f"{entity_id} {name}".lower()
+    return "echo" in haystack or "alexa" in haystack
+
+
+def _entity_areas(hass: HomeAssistant) -> dict[str, str]:
+    """Map entity_id -> area name using the registries (empty when unknown)."""
+    from homeassistant.helpers import area_registry as ar
+    from homeassistant.helpers import device_registry as dr
+    from homeassistant.helpers import entity_registry as er
+
+    try:
+        entities = er.async_get(hass)
+        devices = dr.async_get(hass)
+        areas = ar.async_get(hass)
+    except (AttributeError, KeyError):  # pragma: no cover – very old HA
+        return {}
+
+    names = {area.id: area.name for area in areas.async_list_areas()}
+    result: dict[str, str] = {}
+    for entry in entities.entities.values():
+        area_id = entry.area_id
+        if not area_id and entry.device_id:
+            device = devices.async_get(entry.device_id)
+            area_id = device.area_id if device else None
+        if area_id and area_id in names:
+            result[entry.entity_id] = names[area_id]
+    return result
 
 
 def _settings_payload(options: dict[str, Any]) -> dict[str, Any]:
@@ -332,7 +449,7 @@ def _state(hass: HomeAssistant, entity_id: str):
 
 
 async def _calendar_payload(hass: HomeAssistant, coordinator: DacCoordinator) -> dict:
-    """Own + external vacation days for the month grid."""
+    """Own + external vacation days plus every HA calendar for the page."""
     today = dt_util.now().date()
     start = today - timedelta(days=_CALENDAR_PAST_DAYS)
     end = today + timedelta(days=_CALENDAR_LOOKAHEAD_DAYS)
@@ -365,7 +482,54 @@ async def _calendar_payload(hass: HomeAssistant, coordinator: DacCoordinator) ->
         "end": end.isoformat(),
         "own": own_days,
         "external": external_days,
+        "home_calendars": await _home_calendar_events(
+            hass, own_entity, external_calendars, start, end
+        ),
     }
+
+
+async def _home_calendar_events(
+    hass: HomeAssistant,
+    own_entity: str | None,
+    external_calendars: list[str],
+    start: date,
+    end: date,
+) -> list[dict[str, Any]]:
+    """Real HA calendar events for the calendar page.
+
+    DAC's own vacation calendar is rendered from its stored days, every other
+    configured calendar is fetched through the normal ``calendar.get_events``
+    service – so the DAC page shows exactly what Home Assistant shows.
+    """
+    sources: list[str] = []
+    for entity_id in external_calendars or []:
+        if entity_id and entity_id != own_entity and entity_id not in sources:
+            sources.append(entity_id)
+    if not sources:
+        return []
+
+    by_entity = await _fetch_events_by_entity(hass, sources, start, end)
+    result: list[dict[str, Any]] = []
+    for entity_id, events in by_entity.items():
+        for event in events:
+            first = _parse_date(event.get("start"))
+            last = _parse_date(event.get("end")) or first
+            if first is None:
+                continue
+            all_day = len(str(event.get("start") or "")) == 10
+            result.append(
+                {
+                    "date": first.isoformat(),
+                    "end_date": (last or first).isoformat(),
+                    "summary": str(event.get("summary") or "Termin"),
+                    "all_day": all_day,
+                    "start": str(event.get("start") or ""),
+                    "end": str(event.get("end") or ""),
+                    "calendar": entity_id,
+                }
+            )
+    result.sort(key=lambda item: (item["date"], item["summary"]))
+    return result
 
 
 async def _own_vacation_days(
@@ -398,10 +562,10 @@ async def _own_vacation_days(
     return days
 
 
-async def _fetch_events(
+async def _fetch_events_by_entity(
     hass: HomeAssistant, calendars: list[str], start: date, end: date
-) -> list[dict[str, Any]]:
-    """Fetch raw events from the given calendars (empty list on failure)."""
+) -> dict[str, list[dict[str, Any]]]:
+    """Fetch events per calendar entity (empty dict on failure)."""
     try:
         result = await hass.services.async_call(
             "calendar",
@@ -416,10 +580,21 @@ async def _fetch_events(
         )
     except (HomeAssistantError, ValueError) as err:
         _LOGGER.warning("DAC calendar fetch failed: %s", err)
-        return []
+        return {}
+    return {
+        entity_id: list(response.get("events") or [])
+        for entity_id, response in (result or {}).items()
+    }
+
+
+async def _fetch_events(
+    hass: HomeAssistant, calendars: list[str], start: date, end: date
+) -> list[dict[str, Any]]:
+    """Fetch raw events from the given calendars (empty list on failure)."""
+    by_entity = await _fetch_events_by_entity(hass, calendars, start, end)
     events: list[dict[str, Any]] = []
-    for response in result.values():
-        events.extend(response.get("events") or [])
+    for response_events in by_entity.values():
+        events.extend(response_events)
     return events
 
 

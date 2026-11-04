@@ -1,8 +1,9 @@
-"""Frontend integration for DAC: serves the panel and adds it to the sidebar.
+"""Frontend integration for DAC: serves the dashboard and adds it to the sidebar.
 
 * ``dac-panel.js`` is served from ``/dac/static/dac-panel.js``.
-* A custom sidebar panel "DAC" (url path ``/dac``) is registered via
-  ``panel_custom`` – the whole configuration happens inside that page.
+* One custom sidebar panel "DAC" (url path ``/dac``) hosts the whole
+  dashboard – Home, Kalender, Einstellungen und Hilfe sind Seiten (Tabs)
+  innerhalb dieser einen Seite.
 
 Everything is idempotent and safe to run on every HA start.
 """
@@ -19,9 +20,6 @@ from homeassistant.core import HomeAssistant, callback
 from .const import (
     PANEL_ELEMENT,
     PANEL_MODULE_PATH,
-    PANEL_SETTINGS_ELEMENT,
-    PANEL_SETTINGS_TITLE,
-    PANEL_SETTINGS_URL_PATH,
     PANEL_TITLE,
     PANEL_URL_PATH,
 )
@@ -30,11 +28,10 @@ _LOGGER = logging.getLogger(__name__)
 
 PANEL_JS = os.path.join(os.path.dirname(__file__), "www", "dac-panel.js")
 PANEL_ICON = "mdi:alarm"
-SETTINGS_ICON = "mdi:cog"
 
 
 async def async_setup_frontend(hass: HomeAssistant) -> None:
-    """Serve the panel modules and register both sidebar entries."""
+    """Serve the panel module and register the DAC dashboard."""
     await _async_register_static(hass)
     _async_register_panel(hass)
 
@@ -58,23 +55,13 @@ async def _async_register_static(hass: HomeAssistant) -> None:
 
 @callback
 def _async_register_panel(hass: HomeAssistant) -> None:
-    """Add the DAC panels to the sidebar (idempotent)."""
+    """Add the DAC dashboard to the sidebar (idempotent)."""
     hass.async_create_task(
         _async_register_panel_impl(
             hass,
             url_path=PANEL_URL_PATH,
-            element=PANEL_ELEMENT,
             title=PANEL_TITLE,
             icon=PANEL_ICON,
-        )
-    )
-    hass.async_create_task(
-        _async_register_panel_impl(
-            hass,
-            url_path=PANEL_SETTINGS_URL_PATH,
-            element=PANEL_SETTINGS_ELEMENT,
-            title=PANEL_SETTINGS_TITLE,
-            icon=SETTINGS_ICON,
         )
     )
 
@@ -83,16 +70,15 @@ async def _async_register_panel_impl(
     hass: HomeAssistant,
     *,
     url_path: str,
-    element: str,
     title: str,
     icon: str,
 ) -> None:
-    """Register one panel, tolerating an already existing registration."""
+    """Register the dashboard, tolerating an already existing registration."""
     try:
         await panel_custom.async_register_panel(
             hass,
             frontend_url_path=url_path,
-            webcomponent_name=element,
+            webcomponent_name=PANEL_ELEMENT,
             sidebar_title=title,
             sidebar_icon=icon,
             module_url=PANEL_MODULE_PATH,
@@ -100,7 +86,7 @@ async def _async_register_panel_impl(
             config=panel_config(),
             require_admin=False,
         )
-        _LOGGER.info("DAC panel registered at /%s", url_path)
+        _LOGGER.info("DAC dashboard registered at /%s", url_path)
     except ValueError:
         _LOGGER.debug("DAC panel /%s already registered", url_path)
     except Exception as err:  # noqa: BLE001 – never break startup over the panel

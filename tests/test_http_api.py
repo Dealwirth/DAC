@@ -237,6 +237,116 @@ async def test_get_exposes_entity_suggestions(hass: HomeAssistant, loaded_entry)
     assert by_id["light.bedroom"]["name"] == "Schlafzimmer"
 
 
+async def test_entity_suggestions_flag_alexa_and_area(hass: HomeAssistant, loaded_entry) -> None:
+    """Echo players are flagged and entities carry their area for the search."""
+    from homeassistant.helpers import area_registry as ar
+    from homeassistant.helpers import device_registry as dr
+    from homeassistant.helpers import entity_registry as er
+
+    hass.states.async_set("media_player.echo_kuche", "idle", {"friendly_name": "Echo Küche"})
+    hass.states.async_set("media_player.sonos", "idle", {"friendly_name": "Sonos"})
+
+    area = ar.async_get(hass).async_create("Küche")
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=loaded_entry.entry_id,
+        identifiers={("test", "echo-device")},
+    )
+    dr.async_get(hass).async_update_device(device.id, area_id=area.id)
+    entity_registry = er.async_get(hass)
+    registry_entry = entity_registry.async_get_or_create(
+        "media_player", "test", "echo-kuche", device_id=device.id
+    )
+    hass.states.async_set(registry_entry.entity_id, "idle", {"friendly_name": "Echo Küche"})
+
+    view = DacApiView()
+    entry = _payload(await view.get(FakeRequest(hass)))["entries"][0]
+    by_id = {item["id"]: item for item in entry["entities"]}
+
+    assert by_id["media_player.echo_kuche"]["alexa"] is True
+    assert by_id["media_player.sonos"]["alexa"] is False
+    assert by_id[registry_entry.entity_id]["area"] == "Küche"
+
+
+async def test_get_lists_all_calendars(hass: HomeAssistant, loaded_entry) -> None:
+    """The calendar page gets every calendar plus its DAC/vacation role."""
+    hass.states.async_set("calendar.feiertage", "off", {"friendly_name": "Feiertage"})
+    hass.states.async_set("calendar.vac", "off", {"friendly_name": "Urlaub"})
+
+    view = DacApiView()
+    entry = _payload(await view.get(FakeRequest(hass)))["entries"][0]
+    by_id = {item["id"]: item for item in entry["calendars"]}
+
+    own = entry["calendar"]["entity_id"]
+    assert own in by_id and by_id[own]["is_own"] is True
+    # The configured vacation calendar is flagged as such.
+    assert by_id["calendar.vac"]["is_vacation"] is True
+    assert by_id["calendar.feiertage"]["is_vacation"] is False
+
+
+async def test_get_exposes_notify_services(hass: HomeAssistant, loaded_entry) -> None:
+    """The settings page offers the available notify services."""
+    entry = _payload(await DacApiView().get(FakeRequest(hass)))["entries"][0]
+    services = entry["notify_services"]
+    assert services
+    assert all(service.startswith("notify.") for service in services)
+
+
+async def test_import_vacation_from_home_calendar(hass: HomeAssistant, loaded_entry) -> None:
+    """An HA calendar day can be copied into the DAC vacation calendar."""
+    view = DacApiView()
+    response = await view.post(
+        FakeRequest(
+            hass,
+            {
+                "action": "import_vacation",
+                "date": "2026-09-24",
+                "summary": "Brückentag",
+                "source": "calendar.feiertage",
+            },
+        )
+    )
+    assert _payload(response) == {"ok": True}
+    calendar = _lookup_entity(hass, "calendar.dac_urlaubskalender")
+    assert calendar is not None
+    assert len(calendar._events) == 1
+    assert calendar._events[0]["summary"] == "Brückentag"
+    assert "calendar.feiertage" in calendar._events[0]["description"]
+
+    # Importing the same day twice is a no-op (no duplicate events).
+    await view.post(
+        FakeRequest(
+            hass,
+            {"action": "import_vacation", "date": "2026-09-24", "source": "calendar.feiertage"},
+        )
+    )
+    assert len(calendar._events) == 1
+
+
+async def test_import_vacation_requires_date(hass: HomeAssistant, loaded_entry) -> None:
+    view = DacApiView()
+    response = await view.post(FakeRequest(hass, {"action": "import_vacation", "source": "calendar.x"}))
+    assert response.status == 400
+
+
+async def test_get_exposes_home_calendar_events(hass: HomeAssistant, loaded_entry) -> None:
+    """Configured HA calendars are read through calendar.get_events for the page."""
+    calls: list[dict] = []
+
+    async def fake_call(domain, service, data=None, **kwargs):
+        calls.append({"domain": domain, "service": service, "data": data})
+        return {"calendar.vac": {"events": [
+            {"start": "2026-09-24", "end": "2026-09-25", "summary": "Brückentag"}
+        ]}}
+
+    with patch.object(type(hass.services), "async_call", side_effect=fake_call):
+        entry = _payload(await DacApiView().get(FakeRequest(hass)))["entries"][0]
+
+    assert any(c["service"] == "get_events" for c in calls)
+    events = entry["calendar"]["home_calendars"]
+    assert any(ev["summary"] == "Brückentag" for ev in events)
+    assert any(ev["all_day"] is True for ev in events)
+
+
 async def test_post_test_mode_start_and_cancel(hass: HomeAssistant, loaded_entry) -> None:
     """The panel can arm and cancel a test alarm through the API."""
     view = DacApiView()

@@ -29,6 +29,7 @@
           "pre_alarm_minutes": "Pre-alarm on the Echo: minutes before the wake-up time",
           "vacation_keywords": "Vacation keywords (comma separated)",
           "loop_interval_minutes": "Wake loop: repeat every N minutes until stopped (1-60)",
+          "max_ring_minutes": "Safety stop: stop the alarm automatically after N minutes (0 = ring until stopped)",
           "test_mode_minutes": "Test mode: test alarm rings after N minutes",
           "stop_word": "Stop word: name of the Echo alarm that stops DAC via an Alexa routine"
         }

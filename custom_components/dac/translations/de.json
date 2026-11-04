@@ -29,6 +29,7 @@
           "pre_alarm_minutes": "Vorab-Wecker auf dem Echo: Minuten vor der Weckzeit",
           "vacation_keywords": "Urlaubs-Schlagwörter (Komma-getrennt)",
           "loop_interval_minutes": "Weck-Wiederholung: alle N Minuten wiederholen, bis gestoppt wird (1-60)",
+          "max_ring_minutes": "Not-Aus: Wecker nach N Minuten automatisch stoppen (0 = bis zum manuellen Stopp klingeln)",
           "test_mode_minutes": "Testmodus: Testwecker klingelt nach N Minuten",
           "stop_word": "Stopp-Wort: Name des Echo-Weckers, der DAC per Alexa-Routine stoppt"
         }

@@ -11,9 +11,11 @@ from homeassistant.util import dt as dt_util
 from custom_components.dac.const import (
     CONF_ALEXA_ENABLED,
     CONF_LOOP_INTERVAL_MINUTES,
+    CONF_MAX_RING_MINUTES,
     CONF_STOP_WORD,
     CONF_TEST_MODE_MINUTES,
     DEFAULT_LOOP_INTERVAL_MINUTES,
+    DEFAULT_MAX_RING_MINUTES,
     DEFAULT_STOP_WORD,
 )
 from custom_components.dac.coordinator import DacCoordinator
@@ -207,3 +209,85 @@ def test_start_test_schema_accepts_minutes(minutes) -> None:
     payload = {} if minutes is None else {"minutes": minutes}
     validated = START_TEST_SCHEMA(payload)
     assert validated.get("minutes") == minutes
+
+
+# ---------------------------------------------------- abandoned alarm recovery
+@freeze_time("2026-09-06 05:00:00")
+async def test_abandoned_alarm_never_survives_the_day(
+    hass: HomeAssistant, coordinator: DacCoordinator
+) -> None:
+    """A ringing alarm that is never stopped must not stay 'ringing' forever.
+
+    The live HA instance was found stuck on 'ringing' a full day after the
+    alarm had fired, with the next alarm already scheduled for tomorrow.
+    """
+    await coordinator.async_set_work_time(FakeCall({"time": "15:00"}))
+    await coordinator._alarm_fired(dt_util.now())
+    assert coordinator._state == "ringing"
+
+    with freeze_time("2026-09-07 05:00:00"):
+        await coordinator._loop_tick(dt_util.now())
+    assert coordinator._state != "ringing"
+    assert coordinator._loop_unsub is None
+
+
+@freeze_time("2026-09-06 05:00:00")
+async def test_safety_cap_stops_runaway_alarm(
+    hass: HomeAssistant, coordinator: DacCoordinator
+) -> None:
+    """The safety cap ends an alarm that rings longer than max_ring_minutes."""
+    coordinator._options[CONF_MAX_RING_MINUTES] = 60
+    await coordinator.async_set_work_time(FakeCall({"time": "15:00"}))
+    await coordinator._alarm_fired(dt_util.now())
+    assert coordinator._state == "ringing"
+
+    await coordinator._loop_tick(dt_util.now() + timedelta(minutes=61))
+    assert coordinator._state == "stopped"
+    assert coordinator._loop_unsub is None
+
+
+@freeze_time("2026-09-06 05:00:00")
+async def test_safety_cap_zero_rings_forever(
+    hass: HomeAssistant, coordinator: DacCoordinator
+) -> None:
+    """max_ring_minutes=0 disables the cap: the alarm keeps ringing."""
+    coordinator._options[CONF_MAX_RING_MINUTES] = 0
+    await coordinator.async_set_work_time(FakeCall({"time": "15:00"}))
+    await coordinator._alarm_fired(dt_util.now())
+    assert coordinator._state == "ringing"
+
+    await coordinator._loop_tick(dt_util.now() + timedelta(hours=5))
+    assert coordinator._state == "ringing"
+
+
+@freeze_time("2026-09-06 05:00:00")
+async def test_ringing_alarm_is_not_rescheduled_to_tomorrow(
+    hass: HomeAssistant, coordinator: DacCoordinator
+) -> None:
+    """While ringing, a re-arm must not push the target to the next day.
+
+    Regression for the live bug: the daily 20:30 reminder re-armed the alarm
+    during the wake loop, so the sensor showed "ringing" next to a tomorrow
+    timestamp while the lights stayed on all night.
+    """
+    await coordinator.async_set_work_time(FakeCall({"time": "15:00"}))
+    target_before = coordinator._alarm_target
+    await coordinator._alarm_fired(dt_util.now())
+    assert coordinator._state == "ringing"
+
+    # The reminder/scan re-arms while the loop is still running.
+    with freeze_time("2026-09-06 18:30:00"):  # Berlin 20:30, cutoff passed
+        coordinator._reschedule_alarm()
+    assert coordinator._state == "ringing"
+    assert coordinator._alarm_target == target_before
+
+
+async def test_max_ring_minutes_default_and_bounds(coordinator: DacCoordinator) -> None:
+    """The safety cap defaults to 60 min and is clamped to 0..600."""
+    assert coordinator.max_ring_minutes == DEFAULT_MAX_RING_MINUTES
+    coordinator._options[CONF_MAX_RING_MINUTES] = 0
+    assert coordinator.max_ring_minutes == 0
+    coordinator._options[CONF_MAX_RING_MINUTES] = -5
+    assert coordinator.max_ring_minutes == 0
+    coordinator._options[CONF_MAX_RING_MINUTES] = 9999
+    assert coordinator.max_ring_minutes == 600

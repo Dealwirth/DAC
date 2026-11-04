@@ -23,6 +23,7 @@ CONF_ALARM_LIGHTS: Final = "alarm_lights"                      # list of light e
 CONF_VACATION_CALENDARS: Final = "vacation_calendars"          # optional external calendar entities
 CONF_VACATION_KEYWORDS: Final = "vacation_keywords"            # words that mark a day as off
 CONF_LOOP_INTERVAL_MINUTES: Final = "loop_interval_minutes"    # how often the alarm repeats
+CONF_MAX_RING_MINUTES: Final = "max_ring_minutes"              # safety stop after N minutes ringing
 CONF_TEST_MODE_MINUTES: Final = "test_mode_minutes"            # test alarm rings in N minutes
 CONF_STOP_WORD: Final = "stop_word"                            # alarm name that stops DAC via Alexa
 
@@ -46,6 +47,7 @@ DEFAULT_VACATION_KEYWORDS: Final = (
     "holiday",
 )
 DEFAULT_LOOP_INTERVAL_MINUTES: Final = 5
+DEFAULT_MAX_RING_MINUTES: Final = 60
 DEFAULT_TEST_MODE_MINUTES: Final = 1
 DEFAULT_STOP_WORD: Final = "Wecker aus"
 DEFAULT_VACATION_SCAN_TIME: Final = "00:01"
@@ -54,6 +56,10 @@ DEFAULT_VACATION_SCAN_TIME: Final = "00:01"
 MIN_LOOP_INTERVAL_MINUTES: Final = 1
 MAX_LOOP_INTERVAL_MINUTES: Final = 60
 MAX_TEST_MODE_MINUTES: Final = 120
+
+# Safety stop: an alarm that is never stopped ends itself after this many
+# minutes (0 disables the limit and rings until stopped manually).
+MAX_MAX_RING_MINUTES: Final = 600
 
 # --- Internal states (sensor attribute + diagnostics) ----------------------
 STATE_IDLE: Final = "idle"
@@ -107,16 +113,13 @@ ALEXA_ROUTINE_NAME: Final = "DAC Stopp"
 SERVICE_SET_ALEXA_ALARM: Final = "set_alexa_alarm"
 SERVICE_CLEAR_ALEXA_ALARM: Final = "clear_alexa_alarm"
 
-# --- Sidebar panels ---------------------------------------------------------
+# --- Sidebar panel ----------------------------------------------------------
+# Ein einziger Sidebar-Eintrag „DAC“; die früheren Seiten (Steuerung,
+# Einstellungen, Kalender, Hilfe) sind jetzt Tabs innerhalb dieses Dashboards.
 PANEL_URL_PATH: Final = "dac"
 PANEL_ELEMENT: Final = "dac-panel"
 PANEL_MODULE_PATH: Final = "/dac/static/dac-panel.js"
 PANEL_TITLE: Final = "DAC"
-
-# The settings live on their own page (separate sidebar entry).
-PANEL_SETTINGS_URL_PATH: Final = "dac-settings"
-PANEL_SETTINGS_ELEMENT: Final = "dac-settings-panel"
-PANEL_SETTINGS_TITLE: Final = "DAC Einstellungen"
 
 # Entity search: the API offers every entity as one flat searchable list; the
 # panel filters it per field by domain. Only noisy/internal domains are skipped.
