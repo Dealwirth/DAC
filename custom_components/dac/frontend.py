@@ -22,6 +22,7 @@ from .const import (
     PANEL_MODULE_PATH,
     PANEL_TITLE,
     PANEL_URL_PATH,
+    VERSION,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -81,7 +82,9 @@ async def _async_register_panel_impl(
             webcomponent_name=PANEL_ELEMENT,
             sidebar_title=title,
             sidebar_icon=icon,
-            module_url=PANEL_MODULE_PATH,
+            # A version query busts the browser module cache after an update;
+            # without it a new release kept loading the old panel from cache.
+            module_url=f"{PANEL_MODULE_PATH}?v={VERSION}",
             embed_iframe=False,
             config=panel_config(),
             require_admin=False,

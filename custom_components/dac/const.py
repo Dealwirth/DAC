@@ -6,6 +6,10 @@ from typing import Final
 DOMAIN: Final = "dac"
 MANUFACTURER: Final = "Dealwirth"
 
+# Bumped together with manifest.json; used to bust the panel module cache so a
+# new release never loads a stale dac-panel.js from the browser cache.
+VERSION: Final = "0.8.3"
+
 # --- Services -------------------------------------------------------------
 SERVICE_SET_WORK_TIME: Final = "set_work_time"
 SERVICE_STOP_ALARM: Final = "stop_alarm"
