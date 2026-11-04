@@ -251,6 +251,25 @@ async def test_mode_dismissed(hass: HomeAssistant, coordinator: DacCoordinator):
     assert coordinator._alarm_target is None
 
 
+@freeze_time("2026-09-06 05:00:00")
+async def test_standard_mode_reenables_after_dismissed(
+    hass: HomeAssistant, coordinator: DacCoordinator
+):
+    """Switching back to Standard must clear the "off today" status again.
+
+    Regression: after "Heute aus" the status stayed "deaktiviert" even after
+    the user switched back to Standard, so the alarm looked disabled.
+    """
+    await coordinator.async_set_work_time(_fake_call({"time": "15:00"}))
+    await coordinator.async_set_mode(MODE_DISMISSED)
+    assert coordinator._state == STATE_DISMISSED
+
+    await coordinator.async_set_mode(MODE_STANDARD)
+    assert coordinator.current_mode == MODE_STANDARD
+    assert coordinator._state == STATE_SCHEDULED
+    assert coordinator._alarm_target is not None
+
+
 # ---------------------------------------------------------------------------
 # tests: vacation check via calendar service
 # ---------------------------------------------------------------------------

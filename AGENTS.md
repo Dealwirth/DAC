@@ -6,7 +6,7 @@ Repo: https://github.com/Dealwirth/DAC
 
 ## Umgebung
 - Python 3.13, Home Assistant 2026.2.3 (Test-Matrix in `.github/workflows/ci.yml`).
-- Tests: `python -m pytest tests -q` (116 Tests). Konfiguration in `pytest.ini`.
+- Tests: `python -m pytest tests -q` (122 Tests). Konfiguration in `pytest.ini`.
 - Lint: `python -m ruff check custom_components tests`.
 - JS-Syntaxcheck: `node --check custom_components/dac/www/dac-panel.js`.
 
@@ -48,6 +48,13 @@ Repo: https://github.com/Dealwirth/DAC
 - **Weck-Intervall**: `coordinator.loop_interval_minutes` (Option
   `CONF_LOOP_INTERVAL_MINUTES`, 1–60, Standard 5) steuert die Wiederholung bis
   zum Stopp.
+- **Not-Aus**: `coordinator.max_ring_minutes` (Option `CONF_MAX_RING_MINUTES`,
+  0–600, Standard 60, 0 = unbegrenzt) beendet einen nie gestoppten Wecker
+  selbst (`_loop_tick` → `_ring_expired`). Zusätzlich räumt `_clear_stale_state`
+  einen „ringing/stopped/dismissed"-Zustand vom Vortag auf (Licht aus, Loop
+  aus) und `_reschedule_alarm` lehnt eine Neuplanung ab, solange der Wecker
+  klingelt (`_state == STATE_RINGING`) – so kann kein „ringing" mit
+  morgigem Ziel entstehen.
 - Entfernte Optionen (`media_players`, `alarm_volume`, `wake_text`,
   `alexa_command_type`) sind bewusst gelöscht; `coerce_options()` filtert sie aus
   alten Config-Entries heraus (siehe `test_coerce_options_removed_keys_are_ignored`).

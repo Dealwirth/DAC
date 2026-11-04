@@ -30,6 +30,7 @@ from .const import (
     CONF_ALARM_LIGHTS,
     CONF_DEFAULT_ALARM_TIME,
     CONF_LOOP_INTERVAL_MINUTES,
+    CONF_MAX_RING_MINUTES,
     CONF_NOTIFIER,
     CONF_OFFSET,
     CONF_REMINDER_TEXT,
@@ -37,10 +38,12 @@ from .const import (
     CONF_TEST_MODE_MINUTES,
     CONF_VACATION_CALENDARS,
     DEFAULT_LOOP_INTERVAL_MINUTES,
+    DEFAULT_MAX_RING_MINUTES,
     DEFAULT_REMINDER_TEXT,
     DEFAULT_VACATION_SCAN_TIME,
     DOMAIN,
     MAX_LOOP_INTERVAL_MINUTES,
+    MAX_MAX_RING_MINUTES,
     MIN_LOOP_INTERVAL_MINUTES,
     MODE_DISMISSED,
     MODE_STANDARD,
@@ -62,6 +65,13 @@ from .settings import vacation_keywords
 from .store import DacStore
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class _Call:
+    """Minimal ServiceCall stand-in for internal service invocations."""
+
+    def __init__(self, data: dict[str, Any]) -> None:
+        self.data = data
 
 
 class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -94,6 +104,8 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._alarm_day: date | None = None
         self._alarm_time: time | None = None
         self._alarm_target: datetime | None = None
+        self._state_day: date | None = None       # day the current state belongs to
+        self._state: str = STATE_IDLE
         self._set_state(STATE_IDLE)
         self._last_vacation_day: date | None = None
         self._is_vacation: bool = False
@@ -101,6 +113,7 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._stopped_days: set[date] = set()
         self._vacation_override_day: date | None = None
         self._test_target: datetime | None = None
+        self._ring_started: datetime | None = None  # when the current loop began
         self._loop_unsub: Callable[[], None] | None = None
         self._ringing_jobs: list[Callable[[], None]] = []
         self.alexa = AlexaBridge(hass, self)
@@ -133,8 +146,33 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     @callback
     def _set_state(self, state: str) -> None:
-        """Update the internal state machine value."""
+        """Update the internal state machine value and remember its day."""
+        if state != self._state:
+            self._state_day = dt_util.now().date()
         self._state = state
+
+    @callback
+    def _clear_stale_state(self, now: datetime) -> bool:
+        """Forget a sticky state ('ringing'/'stopped'/'dismissed') from a past day.
+
+        Returns True when a stale state was cleared, so the caller can also end
+        a wake loop that was left running. The ringing state is not persisted
+        across restarts, and the wake loop keeps running until it is stopped.
+        If that never happens (HA was down, the alarm was missed, the phone
+        never rang) the state would otherwise stay 'ringing' forever – and the
+        alarm would never re-arm on its own.
+        """
+        if self._state in (STATE_IDLE, STATE_SCHEDULED, STATE_VACATION):
+            return False
+        now_local = dt_util.as_local(now)
+        if self._state_day is None or self._state_day >= now_local.date():
+            return False
+        _LOGGER.info(
+            "DAC clearing stale '%s' state left over from %s", self._state, self._state_day
+        )
+        self._state = STATE_IDLE
+        self._state_day = None
+        return True
 
     def _snapshot(self) -> dict[str, Any]:
         return {
@@ -186,6 +224,15 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except (TypeError, ValueError):
             value = DEFAULT_LOOP_INTERVAL_MINUTES
         return max(MIN_LOOP_INTERVAL_MINUTES, min(MAX_LOOP_INTERVAL_MINUTES, value))
+
+    @property
+    def max_ring_minutes(self) -> int:
+        """Safety cap: end the alarm automatically after N minutes (0 = off)."""
+        try:
+            value = int(self._options.get(CONF_MAX_RING_MINUTES, DEFAULT_MAX_RING_MINUTES))
+        except (TypeError, ValueError):
+            value = DEFAULT_MAX_RING_MINUTES
+        return max(0, min(MAX_MAX_RING_MINUTES, value))
 
     @property
     def test_mode_active(self) -> bool:
@@ -334,9 +381,15 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._async_dismiss_for(today)
         else:  # MODE_STANDARD
             self._vacation_override_day = None
+            # "Standard" re-enables the alarm: drop today's dismissal, forget a
+            # sticky stopped/dismissed state and let the schedule be recomputed
+            # so the status is no longer "off".
             self._dismissed_days.discard(today)
+            if self._state in (STATE_DISMISSED, STATE_STOPPED):
+                self._set_state(STATE_IDLE)
             # Re-evaluate vacation state from calendars (clears stale overrides).
             await self._async_vacation_check()
+        self._reschedule_alarm()
         await self.async_save_state()
         self.hass.async_create_task(self.alexa.async_sync())
 
@@ -421,6 +474,9 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._alarm_day = saved_target.date()
             self._alarm_time = saved_target.time()
             self._set_state(STATE_RINGING)
+            # Count the safety cap from the original fire time, so a restart
+            # during the alarm cannot extend the ring window indefinitely.
+            self._ring_started = saved_target
             self.async_update_listeners()
             await self._async_fire_once()
             self._start_loop()
@@ -530,6 +586,16 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.async_update_listeners()
             return
 
+        now = dt_util.now()
+        self._clear_stale_state(now)
+        if self._state == STATE_RINGING:
+            # The wake loop owns the schedule until the alarm is stopped.
+            # Without this guard a later re-arm (daily scan, reminder, mode
+            # change) would push the target to the next day while the alarm
+            # kept ringing – leaving "ringing" next to a tomorrow timestamp.
+            self.async_update_listeners()
+            return
+
         for job in self._ringing_jobs:
             job()
         self._ringing_jobs = []
@@ -540,7 +606,6 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._sync_gate(False)
             return
 
-        now = dt_util.now()
         if now.date() in self._dismissed_days and (
             self._alarm_day is None or self._alarm_day <= now.date()
         ):
@@ -620,6 +685,7 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._set_state(STATE_VACATION if self._is_vacation else STATE_DISMISSED)
             return
         self._set_state(STATE_RINGING)
+        self._ring_started = dt_util.now()
         self.async_update_listeners()
         # Mirror the YAML "gate on while ringing": DAC owns the gate so the
         # Echo pre-alarm keeps being placed even across restarts.
@@ -637,8 +703,31 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _loop_tick(self, now: datetime) -> None:
         if self._state != STATE_RINGING:
+            if self._loop_unsub is not None:
+                # The loop outlived its alarm (e.g. the state was cleared on a
+                # new day): stop it and switch the lights back off.
+                await self._async_turn_off_lights()
+                await self._async_stop_loop()
+            return
+        if self._clear_stale_state(now):
+            await self._async_turn_off_lights()
+            await self._async_stop_loop()
+            return
+        if self._ring_expired(now):
+            _LOGGER.info(
+                "DAC safety stop: alarm rang for %s min – stopping automatically",
+                self.max_ring_minutes,
+            )
+            await self.async_stop_alarm(_Call({}))
             return
         await self._async_fire_once()
+
+    def _ring_expired(self, now: datetime) -> bool:
+        """True when the safety cap (max ring minutes) has been reached."""
+        limit = self.max_ring_minutes
+        if not limit or self._ring_started is None:
+            return False
+        return now - self._ring_started >= timedelta(minutes=limit)
 
     async def _async_fire_once(self) -> None:
         """One loop iteration: turn on the lights, re-place the Echo alarm.
@@ -661,6 +750,19 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # stopped).
         await self.alexa.async_pre_alarm()
 
+    async def _async_turn_off_lights(self) -> None:
+        """Switch the alarm lights back off (cleanup after an abandoned alarm)."""
+        for light in list(self._options.get(CONF_ALARM_LIGHTS) or []):
+            state = self.hass.states.get(light)
+            if state is None or state.state == "off":
+                continue
+            try:
+                await self.hass.services.async_call(
+                    "light", "turn_off", {"entity_id": light}, blocking=True
+                )
+            except HomeAssistantError as err:
+                _LOGGER.warning("DAC could not turn off %s: %s", light, err)
+
     def _sync_gate(self, on: bool) -> None:
         """Mirror the alarm state onto the wecker_aktiv gate (YAML Tag 1/Tag 4).
 
@@ -680,6 +782,7 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             job()
         self._ringing_jobs = []
         self._test_target = None
+        self._ring_started = None
         await self.alexa.async_clear_own()
         if set_state:
             self._set_state(set_state)

@@ -555,6 +555,9 @@ class DacPanel extends DacBase {
         </div>
         <div class="target">${esc(dateLabel(entry.alarm_target) || "Kein Weckzeitpunkt berechnet")}</div>
         ${ringing ? `<button class="btn stop" id="stop">⛔ Wecker stoppen</button>` : ""}
+        ${ringing && entry.settings && entry.settings.max_ring_minutes
+          ? `<p class="hint hero-hint">Not-Aus: stoppt automatisch nach ${esc(entry.settings.max_ring_minutes)} min.</p>`
+          : ""}
       </header>
 
       <div class="grid">
@@ -786,6 +789,7 @@ class DacPanel extends DacBase {
           ${this._fieldTime("default_alarm_time", "Standard-Weckzeit (Fallback)", s.default_alarm_time)}
           ${this._fieldNumber("offset_minutes", "Offset vor Arbeitsbeginn", s.offset_minutes, 0, 600, 5, "min")}
           ${this._fieldNumber("loop_interval_minutes", "Weck-Wiederholung", s.loop_interval_minutes, 1, 60, 1, "min")}
+          ${this._fieldNumber("max_ring_minutes", "Not-Aus: stoppt selbst nach", s.max_ring_minutes, 0, 600, 5, "min")}
           ${this._fieldNumber("test_mode_minutes", "Testwecker nach", s.test_mode_minutes, 1, 120, 1, "min")}
           ${this._fieldTime("reminder_time", "Tägliche Erinnerung", s.reminder_time)}
           ${this._fieldText("reminder_text", "Erinnerungstext ({alarm_time})", s.reminder_text, "Denk an die Arbeitszeit!")}
@@ -988,6 +992,7 @@ const STYLES = `
   .alarm-time { font-size: 42px; font-weight: 700; }
   .countdown { opacity: .8; }
   .target { opacity: .68; font-size: 13px; margin-top: 2px; }
+  .hero-hint { color: rgba(255,255,255,.85); margin-top: 8px; }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-top: 16px; }
   .card { background: var(--card-background-color, #fff); border-radius: 16px; padding: 16px 18px; box-shadow: 0 2px 10px rgba(0,0,0,.08); }
   .card.wide { margin-top: 16px; }

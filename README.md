@@ -15,6 +15,7 @@ und erinnert dich abends, wenn du vergessen hast, deine Arbeitszeit zu setzen.
 |---|---|
 | **Dynamischer Wecker** | Arbeitsbeginn setzen (NFC, Dashboard, Dienst oder Entität) → Weckzeit = Arbeitsbeginn − Offset |
 | **Weck-Loop** | Licht an + neuer Echo-Wecker im einstellbaren Intervall (1–60 min, Standard 5), bis explizit gestoppt (Home Assistant, Panel oder Alexa) |
+| **Not-Aus** | Klingelt der Wecker zu lange, stoppt er sich selbst nach N Minuten (einstellbar, 0 = unbegrenzt) – Licht geht dabei aus |
 | **Fallback-Weckzeit** | Wurde nichts gesetzt, greift eine konfigurierbare Standard-Weckzeit (z. B. 06:00) – mit intelligenter Cutoff-Logik |
 | **Urlaub & Feiertage** | Täglicher Scan (00:01) gegen einen eigenen Urlaubskalender und/oder externe Kalender; Keywords wie *Urlaub, Feiertag, Ferien, vacation, holiday* |
 | **Reminder** | Tägliche Erinnerung (z. B. 20:30) via frei wählbarem `notify.*`-Dienst, wenn für morgen noch keine Arbeitszeit gesetzt wurde |
@@ -221,6 +222,8 @@ So funktioniert der Alexa-Geräte-Wecker:
    eingestellten Intervall (Standard 5 Minuten) einen neuen **Vorab-Wecker** auf
    dem Echo – so klingelt der Echo auch dann, wenn Home Assistant ausfällt.
    DAC spielt **keine Ansage** ab; der Echo klingelt über seinen eigenen Wecker.
+   Ein nie gestoppter Wecker beendet sich über den **Not-Aus** selbst (Standard
+   60 Minuten) und wird spätestens am nächsten Tag automatisch zurückgesetzt.
 4. **Deaktivierung (Tag 4)**: Stoppt den Loop, schaltet den Gate-Helfer aus,
    löscht nur den DAC-eigenen Echo-Wecker und setzt den gespeicherten
    Wecker-Text zurück.
@@ -263,7 +266,7 @@ py -m venv .venv
 .venv/Scripts/python -m pytest tests -v
 ```
 
-116 Tests decken die komplette Weck-Logik ab: Offset-Berechnung, Mitternachts-Wrap,
+122 Tests decken die komplette Weck-Logik ab: Offset-Berechnung, Mitternachts-Wrap,
 Fallback-/Cutoff-Semantik inkl. Oversleep-Schutz, Weck-Loop mit einstellbarem
 Intervall, Testmodus (Armen/Klingeln/Abbruch/Stopp), Dismiss, Vacation-Check,
 Reminder, Persistenz, Alexa-Bridge (morgens/abends, echter Geräte-Wecker ohne TTS,
