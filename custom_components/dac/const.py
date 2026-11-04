@@ -8,7 +8,7 @@ MANUFACTURER: Final = "Dealwirth"
 
 # Bumped together with manifest.json; used to bust the panel module cache so a
 # new release never loads a stale dac-panel.js from the browser cache.
-VERSION: Final = "0.8.5"
+VERSION: Final = "0.8.6"
 
 # --- Services -------------------------------------------------------------
 SERVICE_SET_WORK_TIME: Final = "set_work_time"

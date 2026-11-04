@@ -481,3 +481,55 @@ async def test_force_sync_does_not_clear_same_time_alarm(
     texts = [data.get("media_content_id", "") for d, s, data in service_calls if s == "play_media"]
     assert any(t.startswith("stelle einen Wecker auf ") for t in texts), texts
     assert not any(t.startswith("lösche den Wecker") for t in texts), texts
+
+
+# ----------------------------------------------------------- orphan cleanup
+@freeze_time("2026-09-06 19:00:00")
+async def test_orphan_alarm_is_cleaned_up(
+    hass: HomeAssistant, coordinator, service_calls: list[tuple[str, str, dict]]
+) -> None:
+    """When the schedule empties, a leftover DAC alarm is removed.
+
+    Live bug: after the schedule was cleared an alarm DAC had placed stayed on
+    the Echo (e.g. 06:13) and would have rung although DAC wanted no alarm.
+    """
+    from tests.conftest import FakeCall
+
+    coordinator._options[CONF_ALEXA_ENABLED] = True
+    await coordinator.async_set_work_time(FakeCall({"time": "06:45"}))
+    placed = coordinator.alexa.last_placed
+    assert placed
+
+    # The schedule is dismissed -> nothing should ring, but the device still
+    # holds the alarm DAC placed.
+    coordinator._dismissed_days.add(coordinator._alarm_day)
+    coordinator._reschedule_alarm()
+    hass.states.async_set(
+        "sensor.echo_next_alarm",
+        "unknown",
+        {"sorted_all": [{"status": "ON", "date_time": "2026-09-07T05:43:00+02:00"}]},
+    )
+
+    service_calls.clear()
+    await coordinator.alexa.async_ensure_scheduled()
+
+    texts = [data.get("media_content_id", "") for d, s, data in service_calls if s == "play_media"]
+    assert any(t.startswith("lösche den Wecker") for t in texts), texts
+
+
+async def test_orphan_cleanup_never_touches_foreign_alarms(
+    hass: HomeAssistant, coordinator, service_calls: list[tuple[str, str, dict]]
+) -> None:
+    """Without a DAC-placed alarm nothing is deleted (manual alarms survive)."""
+    coordinator._options[CONF_ALEXA_ENABLED] = True
+    # Vacation -> DAC wants no alarm at all, but it never placed one either.
+    coordinator._is_vacation = True
+    hass.states.async_set(
+        "sensor.echo_next_alarm",
+        "unknown",
+        {"sorted_all": [{"status": "ON", "date_time": "2026-09-07T07:00:00+02:00"}]},
+    )
+    service_calls.clear()
+    await coordinator.alexa.async_ensure_scheduled()
+    texts = [data.get("media_content_id", "") for d, s, data in service_calls if s == "play_media"]
+    assert texts == []

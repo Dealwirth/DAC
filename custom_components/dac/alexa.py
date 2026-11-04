@@ -64,6 +64,10 @@ class AlexaBridge:
         self.coordinator = coordinator
         self._last_pre_alarm_time: Any = None
         self._pre_alarm: Any = None
+        # The time DAC last placed on the device, persisted by the coordinator.
+        # Needed to clean up an orphaned alarm after the schedule became empty
+        # (the input_text helper may already have been cleared by then).
+        self._last_placed: Any = None
         # Serialise syncs: set_work_time triggers a background sync while the
         # service may await one too – without this the alarm is placed twice.
         self._sync_lock = asyncio.Lock()
@@ -195,6 +199,7 @@ class AlexaBridge:
                 # placing in quick succession made the device drop the second
                 # command, so the alarm was gone after a "Sync".
                 await self.async_send_text(self._set_command(parse_time_str(desired)))
+            self._last_placed = parse_time_str(desired) if desired else None
             await self._async_write_helper(desired or "")
 
     async def async_ensure_scheduled(self) -> None:
@@ -210,6 +215,7 @@ class AlexaBridge:
         desired = self._desired_alarm_text()
         if not desired:
             # Nothing should ring – make sure no stale DAC alarm is left over.
+            await self._async_clear_orphan()
             await self.async_sync()
             return
         if self.device_has_alarm(desired):
@@ -271,6 +277,7 @@ class AlexaBridge:
         if stored and stored != text:
             await self.async_send_text(alexa_clear_text(parse_time_str(stored)))
         await self.async_send_text(self._set_command(value))
+        self._last_placed = value
         await self._async_write_helper(text)
         _LOGGER.debug("DAC placed a manual Alexa alarm for %s (%s)", text, call.data.get(ATTR_DAY))
 
@@ -354,6 +361,38 @@ class AlexaBridge:
             if shifted.date() == now.date():
                 return format_alexa_time(shifted.time())
         return format_alexa_time(alarm_time)
+
+    @property
+    def last_placed(self) -> str | None:
+        """'HH:MM' of the alarm DAC last placed, or None."""
+        return format_alexa_time(self._last_placed) if self._last_placed else None
+
+    def restore_last_placed(self, value: str | None) -> None:
+        """Restore the persisted last-placed time after a restart."""
+        if not value:
+            self._last_placed = None
+            return
+        try:
+            self._last_placed = parse_time_str(value)
+        except ValueError:
+            self._last_placed = None
+
+    async def _async_clear_orphan(self) -> None:
+        """Remove a DAC-placed alarm that is still ringing after the schedule emptied.
+
+        Clearing only happens for the time DAC itself last placed, so a manually
+        configured Echo alarm is never touched.
+        """
+        if not self.enabled or self._last_placed is None:
+            return
+        text = format_alexa_time(self._last_placed)
+        value = self._last_placed
+        self._last_placed = None
+        if not self.device_has_alarm(text):
+            return
+        _LOGGER.info("DAC: removing orphaned Echo alarm %s on %s", text, self.player)
+        await self.async_send_text(alexa_clear_text(value))
+        await self._async_write_helper("")
 
     # ------------------------------------------------------------------ io
     @property

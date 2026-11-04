@@ -449,6 +449,7 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "alarm_target": self._alarm_target.isoformat() if self._alarm_target else None,
             "dismissed": sorted(d.isoformat() for d in self._dismissed_days),
             "stopped": sorted(d.isoformat() for d in self._stopped_days),
+            "last_placed": self.alexa.last_placed,
         }
 
     async def async_save_state(self) -> None:
@@ -483,6 +484,7 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             }
             if data.get("alarm_day"):
                 self._alarm_day = date.fromisoformat(data["alarm_day"])
+            self.alexa.restore_last_placed(data.get("last_placed"))
             saved_state = data.get("state")
         except (ValueError, TypeError) as err:
             _LOGGER.warning("DAC could not restore state: %s", err)
