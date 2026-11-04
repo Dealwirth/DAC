@@ -334,10 +334,14 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         was_test = self._test_target is not None
         self._test_target = None
         if was_ringing:
-            # A stopped test alarm must not consume today's real work time.
-            if not was_test:
+            if was_test:
+                # A stopped test alarm must not consume today's real work time
+                # nor leave a sticky "stopped" state behind – otherwise the
+                # next alarm would fall back to the default time.
+                await self._async_stop_loop(set_state=STATE_IDLE)
+            else:
                 self._stopped_days.add(dt_util.now().date())
-            await self._async_stop_loop(set_state=STATE_STOPPED)
+                await self._async_stop_loop(set_state=STATE_STOPPED)
             # Stopping the alarm means getting up: the lights go off again.
             await self._async_turn_off_lights()
         else:

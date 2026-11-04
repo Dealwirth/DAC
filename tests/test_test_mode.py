@@ -130,16 +130,21 @@ async def test_test_alarm_can_be_cancelled(
 async def test_test_alarm_stops_like_real_alarm(
     hass: HomeAssistant, coordinator: DacCoordinator
 ) -> None:
-    """Stopping the ringing test alarm ends the loop and clears the test flag."""
+    """Stopping the ringing test alarm ends the loop and clears the test flag.
+
+    The real alarm must stay armed and must not be marked "stopped" – a test
+    alarm may never consume the user's real work time.
+    """
     await coordinator.async_set_work_time(FakeCall({"time": "15:00"}))
     await coordinator.async_start_test_alarm(FakeCall({"minutes": 1}))
     await coordinator._alarm_fired(coordinator._test_target)
     assert coordinator._state == "ringing"
 
     await coordinator.async_stop_alarm(FakeCall({}))
-    assert coordinator._state == "stopped"
+    assert coordinator._state != "stopped"
     assert coordinator.test_mode_active is False
     assert coordinator._loop_unsub is None
+    assert coordinator._alarm_target is not None
 
 
 @freeze_time("2026-09-06 10:00:00")
