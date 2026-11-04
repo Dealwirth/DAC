@@ -55,9 +55,37 @@ Repo: https://github.com/Dealwirth/DAC
   aus) und `_reschedule_alarm` lehnt eine Neuplanung ab, solange der Wecker
   klingelt (`_state == STATE_RINGING`) – so kann kein „ringing" mit
   morgigem Ziel entstehen.
+- **Aufräumen nach dem Wecken (wichtig, live verifiziert)**:
+  - `dac.stop_alarm` schaltet die Weck-Lichter aus (`_async_turn_off_lights`)
+    und beendet den Loop – auch der Not-Aus nutzt diesen Pfad.
+  - Der kurze **Vorab-Wecker** auf dem Echo wird beim Stopp mitgelöscht
+    (`AlexaBridge.async_clear_pre_alarm`, gemerkt in `_pre_alarm`); er steht
+    NICHT im `input_text`-Helper. Ohne dieses Löschen klingelt der Echo nach
+    „Wecker stoppen" Minuten später trotzdem.
+  - Ein gestoppter **Testwecker** setzt `STATE_IDLE` (nicht `STATE_STOPPED`) und
+    trägt sich nicht in `_stopped_days` ein – sonst verwirft
+    `_reschedule_alarm` die echte Arbeitszeit und der nächste Wecker fällt auf
+    die Standard-Zeit zurück.
+  - Licht-Dienste werden mit `except Exception` abgefangen (`# noqa: BLE001`):
+    ein fehlendes oder werfendes Licht darf den Weck-Loop nie abbrechen,
+    bevor der Echo-Vorab-Wecker gesetzt wurde.
 - Entfernte Optionen (`media_players`, `alarm_volume`, `wake_text`,
   `alexa_command_type`) sind bewusst gelöscht; `coerce_options()` filtert sie aus
   alten Config-Entries heraus (siehe `test_coerce_options_removed_keys_are_ignored`).
+
+## Live-Instanz (Testumgebung des Nutzers)
+- HA: `https://petryss.duckdns.org:8123` (DuckDNS + HTTPS, selbstsigniertes Zertifikat).
+- HACS-Repo-ID von DAC: `1358438282`; Update per WebSocket
+  (`hacs/repository/refresh` → `hacs/repositories/list` → `hacs/repository/download`).
+- Wichtige Entitäten: Wecklichter `light.1/2/3`, Echo `media_player.max_echo_media`,
+  Gate `input_boolean.wecker_aktiv`, Helper `input_text.gestellter_alexa_wecker`,
+  Arbeitsbeginn `input_datetime.arbeitsbeginn`.
+- Die frühere YAML-Automation `automation.nfc_weckersystem_komplett`
+  (id `1785685720632`) wurde auf DAC-Dienste umgestellt: NFC-Tags → `dac.set_work_time`
+  (Tag 1 = 06:00, Tag 2 = 07:00), Tag 4 → `dac.stop_alarm`, Arbeitsbeginn-Helfer →
+  `dac.set_work_time`. Das alte Script `script.wecker_alexa_licht_schleife` ist nicht mehr nötig.
+- Dashboard-API zum Speichern von Optionen: `POST /api/dac {"action":"save_settings",...}`.
+  Panel-Aktionen heißen `test_start` / `test_cancel` (nicht `cancel_test`).
 
 ## Konventionen
 - Kein Dauer-Polling im Panel: der Server ist Single Source of Truth, nach jeder
