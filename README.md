@@ -266,7 +266,7 @@ py -m venv .venv
 .venv/Scripts/python -m pytest tests -v
 ```
 
-127 Tests decken die komplette Weck-Logik ab: Offset-Berechnung, Mitternachts-Wrap,
+131 Tests decken die komplette Weck-Logik ab: Offset-Berechnung, Mitternachts-Wrap,
 Fallback-/Cutoff-Semantik inkl. Oversleep-Schutz, Weck-Loop mit einstellbarem
 Intervall, Testmodus (Armen/Klingeln/Abbruch/Stopp), Dismiss, Vacation-Check,
 Reminder, Persistenz, Alexa-Bridge (morgens/abends, echter Geräte-Wecker ohne TTS,

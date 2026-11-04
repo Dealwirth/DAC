@@ -745,7 +745,7 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     await self.hass.services.async_call(
                         "light", "turn_on", {"entity_id": light}, blocking=True
                     )
-                except HomeAssistantError as err:
+                except Exception as err:  # noqa: BLE001 – a broken light must not stop the loop
                     _LOGGER.warning("DAC could not turn on %s: %s", light, err)
         # Keep a fresh short device alarm on the Echo while ringing (the
         # wake loop re-places it every loop interval until the alarm is
@@ -762,7 +762,7 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await self.hass.services.async_call(
                     "light", "turn_off", {"entity_id": light}, blocking=True
                 )
-            except HomeAssistantError as err:
+            except Exception as err:  # noqa: BLE001 – cleanup must always finish
                 _LOGGER.warning("DAC could not turn off %s: %s", light, err)
 
     def _sync_gate(self, on: bool) -> None:
