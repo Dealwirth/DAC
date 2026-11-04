@@ -481,3 +481,113 @@ async def test_restore_ignores_long_past_alarm(
         assert not any(d == "light" for d, _, _ in recorded)
     finally:
         restored.async_shutdown()
+
+
+# ---------------------------------------------------------------------------
+# tests: robustness / error sources
+# ---------------------------------------------------------------------------
+
+
+@freeze_time("2026-09-06 11:59:59")
+async def test_fire_once_survives_missing_light(
+    hass: HomeAssistant, coordinator: DacCoordinator, recorded
+) -> None:
+    """A light entity that does not exist must not break the wake loop.
+
+    Error source: the user removes a light from HA but leaves it in the DAC
+    settings. The loop has to keep ringing (and turn on the other lights).
+    """
+    from custom_components.dac.const import CONF_ALARM_LIGHTS
+
+    coordinator._options[CONF_ALARM_LIGHTS] = ["light.1", "light.gibt_es_nicht"]
+    hass.states.async_set("light.1", "off")
+    coordinator._alarm_time = dt_util.now().time()
+
+    await coordinator._async_fire_once()
+
+    assert any(d == "light" and s == "turn_on" for d, s, _ in recorded)
+
+
+@freeze_time("2026-09-06 11:59:59")
+async def test_fire_once_survives_failing_light_service(
+    hass: HomeAssistant, coordinator: DacCoordinator
+) -> None:
+    """A raising light service call must not abort the loop before Alexa runs.
+
+    Error source: a broken integration raises when turning the light on.
+    """
+    from unittest.mock import patch
+
+    from custom_components.dac.const import CONF_ALARM_LIGHTS, CONF_ALEXA_ENABLED
+
+    coordinator._options[CONF_ALARM_LIGHTS] = ["light.1"]
+    coordinator._options[CONF_ALEXA_ENABLED] = True
+    coordinator._alarm_time = dt_util.now().time()
+    hass.states.async_set("light.1", "off")
+
+    registry_cls = type(hass.services)
+    real_call = registry_cls.async_call
+    sent: list[str] = []
+
+    async def spy(self, domain, service, service_data=None, **kwargs):
+        if domain == "light":
+            raise RuntimeError("boom")
+        if domain == "media_player":
+            sent.append(service_data.get("media_content_id", ""))
+            return None
+        return await real_call(self, domain, service, service_data, **kwargs)
+
+    with patch.object(registry_cls, "async_call", autospec=True, side_effect=spy):
+        await coordinator._async_fire_once()
+
+    assert sent  # the Echo pre-alarm still went out
+
+
+@freeze_time("2026-09-06 11:59:59")
+async def test_turn_off_lights_ignores_missing_and_failing(
+    hass: HomeAssistant, coordinator: DacCoordinator
+) -> None:
+    """Cleanup must not raise on a missing or failing light."""
+    from unittest.mock import patch
+
+    from custom_components.dac.const import CONF_ALARM_LIGHTS
+
+    coordinator._options[CONF_ALARM_LIGHTS] = ["light.1", "light.gibt_es_nicht"]
+    hass.states.async_set("light.1", "on")
+
+    registry_cls = type(hass.services)
+    real_call = registry_cls.async_call
+
+    async def spy(self, domain, service, service_data=None, **kwargs):
+        if domain == "light":
+            raise RuntimeError("boom")
+        return await real_call(self, domain, service, service_data, **kwargs)
+
+    with patch.object(registry_cls, "async_call", autospec=True, side_effect=spy):
+        await coordinator._async_turn_off_lights()  # must not raise
+
+
+@freeze_time("2026-09-06 11:59:59")
+async def test_alexa_command_failure_does_not_break_alarm(
+    hass: HomeAssistant, coordinator: DacCoordinator
+) -> None:
+    """A failing Echo command must never abort the wake loop."""
+    from unittest.mock import patch
+
+    from custom_components.dac.const import CONF_ALARM_LIGHTS, CONF_ALEXA_ENABLED
+
+    coordinator._options[CONF_ALARM_LIGHTS] = ["light.1"]
+    coordinator._options[CONF_ALEXA_ENABLED] = True
+    coordinator._alarm_time = dt_util.now().time()
+    hass.states.async_set("light.1", "off")
+
+    registry_cls = type(hass.services)
+    real_call = registry_cls.async_call
+
+    async def spy(self, domain, service, service_data=None, **kwargs):
+        if domain == "media_player":
+            raise RuntimeError("echo offline")
+        return await real_call(self, domain, service, service_data, **kwargs)
+
+    with patch.object(registry_cls, "async_call", autospec=True, side_effect=spy):
+        await coordinator._async_fire_once()  # must not raise
