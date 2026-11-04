@@ -96,7 +96,9 @@ class DacApiView(HomeAssistantView):
             elif action == "alexa_clear":
                 await coordinator.alexa.async_clear_own()
             elif action == "alexa_sync":
-                await coordinator.alexa.async_sync()
+                # A user pressing "Sync" wants a guaranteed device alarm, not a
+                # no-op when the helper already matches a lost alarm.
+                await coordinator.alexa.async_sync(force=True)
             elif action == "add_vacation":
                 await _add_vacation(hass, coordinator, body)
             elif action == "remove_vacation":

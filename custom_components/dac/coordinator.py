@@ -70,6 +70,10 @@ from .store import DacStore
 
 _LOGGER = logging.getLogger(__name__)
 
+# How often DAC verifies that the Echo really still holds the scheduled alarm.
+# The check is cheap (state read) and only places the alarm when it is missing.
+_ALEXA_WATCHDOG = timedelta(minutes=30)
+
 
 class _Call:
     """Minimal ServiceCall stand-in for internal service invocations."""
@@ -534,8 +538,20 @@ class DacCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.hass, self._reminder_check, hour=rem_h, minute=rem_m, second=0
             )
         )
+        # Keep the real device alarm in sync with what DAC believes it placed.
+        # Without this a lost Echo alarm (Alexa app, power cut) would stay lost
+        # while the input_text helper still claimed the alarm was set.
+        self._unsub.append(
+            async_track_time_interval(self.hass, self._alexa_watchdog, _ALEXA_WATCHDOG)
+        )
         # Run a vacation check right away (e.g. after a restart).
         self.hass.async_create_task(self._async_vacation_check())
+        self._alexa_watchdog(None)
+
+    @callback
+    def _alexa_watchdog(self, now: datetime | None) -> None:
+        """Re-place the Echo alarm if the device lost it (safety net)."""
+        self.hass.async_create_task(self.alexa.async_ensure_scheduled())
 
     @callback
     def _vacation_scan(self, now: datetime) -> None:

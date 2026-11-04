@@ -396,3 +396,63 @@ async def test_reminder_speaks_on_echo_when_enabled(
 
     notify_calls = [c for c in recorded if c[0] == "notify"]
     assert any("alexa_media_echo" == c[1] for c in notify_calls)
+
+
+# --------------------------------------------------------------- watchdog
+@freeze_time("2026-09-06 19:00:00")
+async def test_ensure_scheduled_replaces_lost_alarm(
+    hass: HomeAssistant, coordinator, service_calls: list[tuple[str, str, dict]]
+) -> None:
+    """A lost Echo alarm is re-placed even though the helper still matches.
+
+    Regression for a live bug: the helper said "05:44" but the Echo had no
+    active alarm, so the plain sync skipped the placement (stored == desired)
+    and the user would not have been woken up.
+    """
+    from tests.conftest import FakeCall
+
+    coordinator._options[CONF_ALEXA_ENABLED] = True
+    await coordinator.async_set_work_time(FakeCall({"time": "06:45"}))
+    desired = coordinator.alexa._desired_alarm_text()
+    assert desired
+
+    # The helper claims the alarm is set, but the Echo sensor shows none.
+    _set_state(hass, "input_text.gestellter_alexa_wecker", desired)
+    hass.states.async_set(
+        "sensor.echo_next_alarm", "unknown", {"sorted_all": []}
+    )
+
+    service_calls.clear()
+    await coordinator.alexa.async_ensure_scheduled()
+
+    texts = [data.get("media_content_id", "") for d, s, data in service_calls if s == "play_media"]
+    assert any(t.startswith("stelle einen Wecker auf ") for t in texts), texts
+
+
+@freeze_time("2026-09-06 19:00:00")
+async def test_ensure_scheduled_keeps_existing_alarm(
+    hass: HomeAssistant, coordinator, service_calls: list[tuple[str, str, dict]]
+) -> None:
+    """When the Echo really has the alarm, the watchdog places nothing."""
+    from tests.conftest import FakeCall
+
+    coordinator._options[CONF_ALEXA_ENABLED] = True
+    await coordinator.async_set_work_time(FakeCall({"time": "06:45"}))
+    desired = coordinator.alexa._desired_alarm_text()
+    _set_state(hass, "input_text.gestellter_alexa_wecker", desired)
+    # The device holds exactly the time DAC wants (desired already includes the
+    # pre-alarm shift, so it differs from the raw alarm target).
+    target = coordinator._alarm_target.replace(
+        hour=int(desired[:2]), minute=int(desired[3:]), second=0, microsecond=0
+    )
+    hass.states.async_set(
+        "sensor.echo_next_alarm",
+        target.isoformat(),
+        {"sorted_all": [{"status": "ON", "date_time": target.isoformat()}]},
+    )
+
+    service_calls.clear()
+    await coordinator.alexa.async_ensure_scheduled()
+
+    texts = [data.get("media_content_id", "") for d, s, data in service_calls if s == "play_media"]
+    assert texts == []

@@ -129,27 +129,90 @@ class AlexaBridge:
             return None
         return format_alexa_time(parse_time_str(state.state))
 
+    def device_has_alarm(self, time_text: str) -> bool:
+        """True when the Echo really has an active alarm at ``time_text``.
+
+        Reads the ``sensor.<player>_next_alarm`` state the alexa_media
+        integration exposes and looks for a future alarm whose time matches.
+        The sensor is refreshed by alexa_media itself; when it is missing the
+        method returns True so a forced sync is not triggered on every refresh.
+        """
+        object_id = str(self.player or "").split(".", 1)[-1]
+        if not object_id:
+            return True
+        state = self.hass.states.get(f"sensor.{object_id}_next_alarm")
+        if state is None:
+            return True
+        try:
+            want = parse_time_str(time_text).strftime("%H:%M")
+        except ValueError:
+            return True
+        now = dt_util.now()
+        for alarm in state.attributes.get("sorted_all") or []:
+            if alarm.get("status") != "ON":
+                continue
+            raw = alarm.get("date_time")
+            if not raw:
+                continue
+            try:
+                when = dt_util.parse_datetime(str(raw))
+            except (ValueError, TypeError):
+                continue
+            if when is None or when < now:
+                continue
+            if when.strftime("%H:%M") == want:
+                return True
+        return False
+
     # ------------------------------------------------------------------ sync
-    async def async_sync(self) -> None:
+    async def async_sync(self, *, force: bool = False) -> None:
         """Reconcile the device alarm with the currently computed DAC alarm.
 
         The Echo alarm is placed for the *next* alarm – today **or** tomorrow.
         A work time is normally set in the evening and therefore targets the
         next morning; restricting this to "today" silently produced no alarm at
         all, so the user was never woken up.
+
+        The ``input_text`` helper only mirrors what DAC *believes* it placed.
+        If the device alarm was lost (Alexa app, power cut, another integration)
+        the helper still matches the desired time and a plain sync would skip
+        the placement – so the wake-up would silently not happen. ``force``
+        re-places the alarm and is used when the Echo alarm is known to be gone.
         """
         if not self.enabled:
             return
         async with self._sync_lock:
             desired = self._desired_alarm_text()
             stored = self.stored_alarm()
-            if stored == desired:
+            if stored == desired and not force:
                 return
             if stored:
                 await self.async_send_text(alexa_clear_text(parse_time_str(stored)))
             if desired:
                 await self.async_send_text(self._set_command(parse_time_str(desired)))
             await self._async_write_helper(desired or "")
+
+    async def async_ensure_scheduled(self) -> None:
+        """Make sure the scheduled alarm really exists on the Echo device.
+
+        Runs on every coordinator refresh. If the device alarm matching the
+        stored helper time is gone, the alarm is re-placed (forced sync). This
+        closes the "helper says 05:44, Echo has no active alarm" gap that left
+        the user without a wake-up.
+        """
+        if not self.enabled:
+            return
+        desired = self._desired_alarm_text()
+        if not desired:
+            # Nothing should ring – make sure no stale DAC alarm is left over.
+            await self.async_sync()
+            return
+        if self.device_has_alarm(desired):
+            return
+        _LOGGER.info(
+            "DAC: Echo alarm %s is missing on %s – re-placing it", desired, self.player
+        )
+        await self.async_sync(force=True)
 
     def _desired_alarm_text(self) -> str | None:
         """The device alarm DAC currently wants on the Echo ('HH:MM' or None).
