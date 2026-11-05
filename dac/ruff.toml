@@ -5,4 +5,4 @@ target-version = "py312"
 select = ["E", "F", "W", "I", "B", "UP"]
 
 [lint.per-file-ignores]
-"tests/conftest.py" = ["E402"]
+"**/conftest.py" = ["E402"]

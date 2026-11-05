@@ -46,7 +46,6 @@ def fake_ha(monkeypatch):
     import json as _json
 
     import httpx
-
     from app import ha_client
 
     class FakeHa:

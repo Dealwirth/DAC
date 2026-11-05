@@ -7,7 +7,6 @@ from __future__ import annotations
 from datetime import date, datetime, time
 
 import pytest
-
 from app.logic import (
     compute_alarm_time,
     default_resolution,
