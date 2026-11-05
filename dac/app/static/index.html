@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>DAC – Dynamic Alarm Clock</title>
+<style>
+  :root{
+    --alexa:#00caff; --alexa-2:#1a73e8; --amz:#232f3e; --amz-2:#131a22;
+    --bg:#0f1620; --card:#182130; --card-2:#1f2a3b; --line:#2a3648;
+    --txt:#eef4fb; --mut:#93a4bb; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444;
+    --radius:18px; --shadow:0 10px 30px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  a{color:var(--alexa)}
+  .wrap{max-width:760px;margin:0 auto;padding:18px 16px 90px}
+
+  header{display:flex;align-items:center;gap:12px;margin:6px 0 18px}
+  .logo{width:44px;height:44px;border-radius:14px;flex:0 0 auto;
+    background:linear-gradient(135deg,var(--alexa),var(--alexa-2));
+    display:grid;place-items:center;font-size:24px;box-shadow:0 6px 18px rgba(0,202,255,.35)}
+  h1{font-size:20px;margin:0;letter-spacing:.2px}
+  .sub{color:var(--mut);font-size:12.5px;margin-top:2px}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    padding:18px;margin-bottom:14px;box-shadow:var(--shadow)}
+  .card h2{font-size:13px;text-transform:uppercase;letter-spacing:.12em;color:var(--mut);
+    margin:0 0 12px;font-weight:600}
+
+  .hero{text-align:center;background:linear-gradient(160deg,#1b2836,#141c27);
+    border:1px solid var(--line)}
+  .hero .time{font-size:60px;font-weight:700;letter-spacing:-1.5px;line-height:1;
+    background:linear-gradient(135deg,var(--alexa),#7dd3fc);-webkit-background-clip:text;
+    background-clip:text;color:transparent}
+  .hero .day{color:var(--mut);margin-top:6px;font-size:14px}
+  .countdown{margin-top:14px;display:inline-flex;gap:8px;align-items:center;
+    background:rgba(0,202,255,.12);border:1px solid rgba(0,202,255,.35);
+    padding:8px 14px;border-radius:999px;font-weight:600;font-size:14px;color:#bfeaff}
+
+  .pill{display:inline-flex;align-items:center;gap:7px;padding:5px 12px;border-radius:999px;
+    font-size:12.5px;font-weight:600;border:1px solid transparent}
+  .pill .dot{width:8px;height:8px;border-radius:50%;background:currentColor}
+  .pill.ok{color:var(--ok);background:rgba(34,197,94,.12);border-color:rgba(34,197,94,.35)}
+  .pill.warn{color:var(--warn);background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.35)}
+  .pill.bad{color:var(--bad);background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.35)}
+  .pill.mut{color:var(--mut);background:rgba(147,164,187,.12);border-color:rgba(147,164,187,.3)}
+
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  @media(max-width:520px){.grid3{grid-template-columns:1fr 1fr}}
+
+  .stat{background:var(--card-2);border:1px solid var(--line);border-radius:14px;padding:12px}
+  .stat .k{color:var(--mut);font-size:11.5px;text-transform:uppercase;letter-spacing:.08em}
+  .stat .v{font-size:17px;font-weight:700;margin-top:5px;word-break:break-word}
+
+  button{font:inherit;cursor:pointer;border-radius:14px;border:1px solid var(--line);
+    background:var(--card-2);color:var(--txt);padding:12px 14px;font-weight:600;
+    transition:transform .08s ease,filter .15s ease,background .15s ease}
+  button:hover{filter:brightness(1.12)}
+  button:active{transform:scale(.97)}
+  button.primary{background:linear-gradient(135deg,var(--alexa),var(--alexa-2));
+    border-color:transparent;color:#04121c;font-weight:700}
+  button.ghost{background:transparent}
+  button.danger{background:linear-gradient(135deg,#ef4444,#b91c1c);border-color:transparent;color:#fff}
+  button.wide{width:100%}
+  button.small{padding:8px 11px;font-size:13px;border-radius:11px}
+  button.active{outline:2px solid var(--alexa);outline-offset:1px}
+  button:disabled{opacity:.45;cursor:not-allowed}
+
+  input,select{font:inherit;background:#0e1622;color:var(--txt);border:1px solid var(--line);
+    border-radius:12px;padding:12px 13px;width:100%}
+  input[type=time]{font-size:18px;font-weight:700;letter-spacing:.5px}
+  label{display:block;font-size:12.5px;color:var(--mut);margin:0 0 6px}
+  .field{margin-bottom:12px}
+  .hint{color:var(--mut);font-size:12px;margin-top:6px;line-height:1.5}
+  .switch{display:flex;align-items:center;justify-content:space-between;gap:12px;
+    background:var(--card-2);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:10px}
+  .switch input{width:auto}
+
+  .tabs{display:flex;gap:8px;background:var(--card);border:1px solid var(--line);
+    border-radius:16px;padding:6px;margin-bottom:14px;position:sticky;top:8px;z-index:5}
+  .tabs button{flex:1;background:transparent;border:none;padding:10px;border-radius:11px;color:var(--mut)}
+  .tabs button.active{background:var(--card-2);color:var(--txt)}
+
+  .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:22px;z-index:50;
+    background:var(--amz);border:1px solid var(--line);color:var(--txt);
+    padding:13px 18px;border-radius:14px;box-shadow:var(--shadow);max-width:90vw;
+    opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;font-size:14px}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(-4px)}
+  .toast.err{border-color:var(--bad)}
+
+  .hidden{display:none!important}
+  .muted{color:var(--mut)}
+  .mono{font-variant-numeric:tabular-nums}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .loading{text-align:center;color:var(--mut);padding:30px 0}
+  .list{max-height:230px;overflow:auto;border:1px solid var(--line);border-radius:12px;background:#0e1622}
+  .list label{display:flex;gap:10px;align-items:center;padding:9px 12px;margin:0;
+    border-bottom:1px solid var(--line);color:var(--txt);font-size:13.5px;cursor:pointer}
+  .list label:last-child{border-bottom:none}
+  .list input{width:auto}
+  .list .en{color:var(--mut);font-size:11.5px}
+  .kv{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px dashed var(--line)}
+  .kv:last-child{border-bottom:none}
+  .kv .k{color:var(--mut);font-size:13px}
+  .kv .v{font-weight:600;font-size:13.5px;text-align:right}
+  details summary{cursor:pointer;font-weight:600;color:var(--alexa)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">⏰</div>
+    <div style="flex:1">
+      <h1>DAC <span class="muted" style="font-weight:400;font-size:14px">Dynamic Alarm Clock</span></h1>
+      <div class="sub" id="subline">Wecker, der sich an deinen Arbeitstag anpasst</div>
+    </div>
+    <span class="pill mut" id="status-pill"><span class="dot"></span><span id="status-text">lädt…</span></span>
+  </header>
+
+  <div class="tabs">
+    <button data-tab="control" class="active">Wecker</button>
+    <button data-tab="settings">Einstellungen</button>
+    <button data-tab="help">Hilfe</button>
+  </div>
+
+  <!-- ============================== WECKER ============================== -->
+  <section id="tab-control">
+    <div class="card hero">
+      <h2>Nächster Wecker</h2>
+      <div class="time mono" id="next-time">--:--</div>
+      <div class="day" id="next-day">–</div>
+      <div class="countdown hidden" id="countdown">⏳ <span id="countdown-text"></span></div>
+      <div class="chips" style="justify-content:center">
+        <span class="pill mut" id="pill-vacation">🏖️ Urlaub</span>
+        <span class="pill mut" id="pill-echo">🔊 Echo</span>
+      </div>
+    </div>
+
+    <div class="card" id="ringing-card" style="border-color:var(--bad)">
+      <h2 style="color:var(--bad)">Wecker klingelt</h2>
+      <div class="row">
+        <button class="danger wide" id="btn-stop">🛑 Wecker stoppen</button>
+      </div>
+      <div class="hint">Stoppt Licht, Echo-Wecker und den Weck-Loop.</div>
+    </div>
+
+    <div class="card">
+      <h2>Arbeitsbeginn setzen</h2>
+      <div class="grid2">
+        <div>
+          <label for="work-input">Arbeitsbeginn</label>
+          <input type="time" id="work-input" value="06:45" step="300" />
+        </div>
+        <div style="display:flex;align-items:flex-end;gap:10px">
+          <button class="primary wide" id="btn-set-work">Speichern</button>
+          <button class="ghost" id="btn-clear-work" title="Arbeitsbeginn löschen">✕</button>
+        </div>
+      </div>
+      <div class="chips" id="quick-times"></div>
+      <div class="hint" id="work-hint">Der Wecker klingelt <b id="offset-label">60</b> Minuten vor dem Arbeitsbeginn.</div>
+    </div>
+
+    <div class="card">
+      <h2>Modus</h2>
+      <div class="grid3">
+        <button data-mode="standard" id="mode-standard">🔔 Standard</button>
+        <button data-mode="dismissed" id="mode-dismissed">😴 Heute aus</button>
+        <button data-mode="vacation" id="mode-vacation">🏖️ Urlaub</button>
+      </div>
+      <div class="hint">„Heute aus" überspringt nur den nächsten Wecker. „Urlaub" pausiert, bis du zurück auf Standard stellst.</div>
+    </div>
+
+    <div class="card">
+      <h2>Amazon Echo</h2>
+      <div class="grid2" style="margin-bottom:12px">
+        <div class="stat"><div class="k">Echo</div><div class="v" id="echo-player">–</div></div>
+        <div class="stat"><div class="k">Wecker auf Echo</div><div class="v mono" id="echo-stored">–</div></div>
+      </div>
+      <div class="row">
+        <button class="small" id="btn-alexa-sync">🔄 Abgleichen</button>
+        <button class="small" id="btn-alexa-set">⏰ Jetzt stellen</button>
+        <button class="small ghost" id="btn-alexa-clear">🗑️ Löschen</button>
+      </div>
+      <div class="hint" id="echo-hint">DAC stellt auf dem Echo einen <b>echten</b> Wecker – er klingelt auch ohne Home Assistant.</div>
+    </div>
+
+    <div class="card">
+      <h2>Testwecker</h2>
+      <div class="grid2">
+        <div>
+          <label for="test-minutes">In … Minuten</label>
+          <input type="number" id="test-minutes" min="1" max="120" value="1" />
+        </div>
+        <div style="display:flex;align-items:flex-end;gap:10px">
+          <button class="primary wide" id="btn-test-start">▶️ Start</button>
+          <button class="ghost" id="btn-test-cancel">✕</button>
+        </div>
+      </div>
+      <div class="hint">Klingelt wie der echte Wecker (Licht + Echo) – ideal zum Prüfen.</div>
+    </div>
+
+    <div class="card">
+      <h2>Status</h2>
+      <div class="kv"><span class="k">Zustand</span><span class="v" id="st-state">–</span></div>
+      <div class="kv"><span class="k">Modus</span><span class="v" id="st-mode">–</span></div>
+      <div class="kv"><span class="k">Arbeitsbeginn</span><span class="v mono" id="st-work">–</span></div>
+      <div class="kv"><span class="k">Weckzeit</span><span class="v mono" id="st-alarm">–</span></div>
+      <div class="kv"><span class="k">Offset</span><span class="v" id="st-offset">–</span></div>
+      <div class="kv"><span class="k">Standard-Wecker</span><span class="v mono" id="st-default">–</span></div>
+      <div class="kv"><span class="k">Urlaub</span><span class="v" id="st-vacation">–</span></div>
+      <div class="kv"><span class="k">Testwecker</span><span class="v" id="st-test">–</span></div>
+      <div class="kv"><span class="k">Gate (Wecker aktiv)</span><span class="v" id="st-gate">–</span></div>
+    </div>
+  </section>
+
+  <!-- ============================ EINSTELLUNGEN ======================== -->
+  <section id="tab-settings" class="hidden">
+    <div class="card">
+      <h2>Wecker</h2>
+      <div class="grid2">
+        <div class="field"><label for="s-default">Standard-Weckzeit</label><input type="time" id="s-default" step="300"></div>
+        <div class="field"><label for="s-offset">Offset (Minuten vor Arbeitsbeginn)</label><input type="number" id="s-offset" min="0" max="600"></div>
+        <div class="field"><label for="s-loop">Weck-Intervall (Minuten)</label><input type="number" id="s-loop" min="1" max="60"></div>
+        <div class="field"><label for="s-maxring">Auto-Stopp nach (Minuten, 0 = aus)</label><input type="number" id="s-maxring" min="0" max="600"></div>
+        <div class="field"><label for="s-testmin">Testwecker-Vorgabe (Minuten)</label><input type="number" id="s-testmin" min="1" max="120"></div>
+        <div class="field"><label for="s-reminder">Erinnerungszeit</label><input type="time" id="s-reminder" step="300"></div>
+      </div>
+      <div class="field"><label for="s-notifier">Benachrichtigung (notify-Dienst)</label>
+        <input id="s-notifier" placeholder="notify.mobile_app_handy"></div>
+      <div class="switch"><span>Erinnerung auch auf dem Echo sprechen</span><input type="checkbox" id="s-reminder-alexa"></div>
+      <div class="field"><label for="s-reminder-vol">Echo-Lautstärke der Erinnerung (%)</label><input type="number" id="s-reminder-vol" min="1" max="100"></div>
+      <div class="field"><label for="s-reminder-text">Erinnerungstext</label><input id="s-reminder-text"></div>
+    </div>
+
+    <div class="card">
+      <h2>Licht beim Wecken</h2>
+      <div class="field"><label for="s-light-search">Licht suchen</label><input id="s-light-search" placeholder="z. B. Schlafzimmer"></div>
+      <div class="list" id="s-lights"></div>
+      <div class="switch" style="margin-top:10px"><span>Licht beim Stoppen ausschalten</span><input type="checkbox" id="s-turnoff"></div>
+    </div>
+
+    <div class="card">
+      <h2>Urlaub & Feiertage</h2>
+      <div class="field"><label for="s-cal-search">Kalender suchen</label><input id="s-cal-search" placeholder="z. B. Urlaub"></div>
+      <div class="list" id="s-cals"></div>
+      <div class="field" style="margin-top:10px"><label for="s-keywords">Stichwörter (Komma-getrennt)</label>
+        <input id="s-keywords"></div>
+    </div>
+
+    <div class="card">
+      <h2>Amazon Alexa</h2>
+      <div class="switch"><span>Echo-Wecker verwenden</span><input type="checkbox" id="s-alexa"></div>
+      <div class="field"><label for="s-player">Echo (media_player)</label><input id="s-player" placeholder="media_player.echo"></div>
+      <div class="grid2">
+        <div class="field"><label for="s-helper">Helfer (input_text)</label><input id="s-helper"></div>
+        <div class="field"><label for="s-gate">Gate (input_boolean)</label><input id="s-gate"></div>
+        <div class="field"><label for="s-pre">Vor-Wecker (Minuten)</label><input type="number" id="s-pre" min="0" max="30"></div>
+        <div class="field"><label for="s-alarm-name">Wecker-Name (optional)</label><input id="s-alarm-name"></div>
+      </div>
+      <div class="field"><label for="s-stopword">Stopp-Wort</label><input id="s-stopword"></div>
+    </div>
+
+    <div class="card">
+      <h2>Erweitert (MQTT-Sensoren)</h2>
+      <div class="switch"><span>MQTT-Sensoren veröffentlichen (Dashboard-Karten)</span><input type="checkbox" id="s-mqtt"></div>
+      <div class="grid2">
+        <div class="field"><label for="s-mqtt-host">MQTT-Broker</label><input id="s-mqtt-host"></div>
+        <div class="field"><label for="s-mqtt-port">Port</label><input type="number" id="s-mqtt-port"></div>
+        <div class="field"><label for="s-mqtt-user">Benutzer</label><input id="s-mqtt-user"></div>
+        <div class="field"><label for="s-mqtt-pass">Passwort</label><input type="password" id="s-mqtt-pass"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Werkzeuge</h2>
+      <div class="row">
+        <button class="primary" id="btn-save">💾 Einstellungen speichern</button>
+        <button class="ghost" id="btn-reload">↺ Verwerfen</button>
+      </div>
+      <div class="hint">Änderungen wirken sofort – kein Neustart nötig.</div>
+    </div>
+  </section>
+
+  <!-- ================================ HILFE ============================= -->
+  <section id="tab-help" class="hidden">
+    <div class="card">
+      <h2>Hilfe & Einrichtung</h2>
+      <div id="help-body"><div class="loading">lädt…</div></div>
+    </div>
+    <div class="card">
+      <h2>Dashboard-Karten</h2>
+      <div class="hint">Füge diese Karten in dein Dashboard ein (YAML-Modus):</div>
+      <details style="margin-top:10px">
+        <summary>Entitäten-Karte anzeigen</summary>
+        <pre class="mono" style="white-space:pre-wrap;font-size:12.5px;line-height:1.6;color:#cfe6ff">type: entities
+title: DAC Wecker
+entities:
+  - sensor.dac_naechster_wecker
+  - sensor.dac_status
+  - sensor.dac_modus
+  - sensor.dac_arbeitsbeginn
+  - sensor.dac_weckzeit
+  - sensor.dac_urlaub
+  - sensor.dac_restzeit_minuten</pre>
+      </details>
+      <details style="margin-top:8px">
+        <summary>Knopf-Karte (Wecker stoppen)</summary>
+        <pre class="mono" style="white-space:pre-wrap;font-size:12.5px;line-height:1.6;color:#cfe6ff">type: button
+name: Wecker stoppen
+icon: mdi:alarm-off
+tap_action:
+  action: perform-action
+  perform_action: persistent_notification.create
+  data:
+    message: "Stoppe DAC in der App"</pre>
+      </details>
+    </div>
+    <div class="card">
+      <h2>Fehler simmulieren & prüfen</h2>
+      <div class="hint">Sicher prüfen, was DAC zu einer bestimmten Zeit tun würde – ohne etwas zu verändern.</div>
+      <div class="grid2" style="margin-top:10px">
+        <div class="field"><label for="sim-at">Zeitpunkt</label><input type="datetime-local" id="sim-at"></div>
+        <div class="field"><label for="sim-work">Arbeitsbeginn (optional)</label><input type="time" id="sim-work" step="300"></div>
+      </div>
+      <button class="primary" id="btn-sim">🧪 Simulieren</button>
+      <pre class="mono" id="sim-out" style="white-space:pre-wrap;font-size:12.5px;color:#cfe6ff;margin-top:12px"></pre>
+    </div>
+  </section>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const el = (id) => document.getElementById(id);
+let DATA = null, ENTITIES = {}, TAB = "control";
+
+function toast(msg, isErr) {
+  const t = el("toast");
+  t.textContent = msg;
+  t.className = "toast show" + (isErr ? " err" : "");
+  clearTimeout(t._h);
+  t._h = setTimeout(() => (t.className = "toast"), 3200);
+}
+
+// Relative to <base>, so the same code works at "/" and under Ingress.
+const API = "api/";
+async function api(path, body) {
+  const opts = body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {};
+  const res = await fetch(API + path.replace(/^\//, ""), opts);
+  let data = null;
+  try { data = await res.json(); } catch (e) {}
+  if (!res.ok) throw new Error((data && data.detail) || res.statusText);
+  return data;
+}
+
+async function action(payload, okMsg) {
+  try {
+    const r = await api("/action", payload);
+    toast(r.message || okMsg || "Erledigt");
+    await load();
+  } catch (e) { toast("Fehler: " + e.message, true); }
+}
+
+const STATE_LABEL = {
+  idle: "Bereit", scheduled: "Wecker gestellt", ringing: "Klingelt!",
+  stopped: "Gestoppt", dismissed: "Heute aus", vacation: "Urlaub",
+};
+const MODE_LABEL = { standard: "Standard", dismissed: "Heute aus", vacation: "Urlaub" };
+
+function fmtTarget(iso) {
+  if (!iso) return { time: "--:--", day: "kein Wecker gestellt" };
+  const d = new Date(iso);
+  const today = new Date(); today.setHours(0,0,0,0);
+  const dd = new Date(d); dd.setHours(0,0,0,0);
+  const diff = Math.round((dd - today) / 86400000);
+  const wd = ["Sonntag","Montag","Dienstag","Mittwoch","Donnerstag","Freitag","Samstag"][d.getDay()];
+  const dateStr = d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" });
+  const day = diff === 0 ? `Heute · ${wd}, ${dateStr}` : diff === 1 ? `Morgen · ${wd}, ${dateStr}` : `${wd}, ${dateStr}`;
+  const time = d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+  return { time, day };
+}
+
+function countdown(iso) {
+  if (!iso) return null;
+  const ms = new Date(iso) - new Date();
+  if (ms <= 0) return null;
+  const m = Math.floor(ms / 60000), h = Math.floor(m / 60), d = Math.floor(h / 24);
+  if (d > 0) return `in ${d} Tag${d>1?"en":""} ${h%24} Std.`;
+  if (h > 0) return `in ${h} Std. ${m%60} Min.`;
+  return `in ${m} Min.`;
+}
+
+function render() {
+  if (!DATA) return;
+  const s = DATA.state, a = DATA.alexa, cfg = DATA.settings;
+  const t = fmtTarget(s.alarm_target);
+  el("next-time").textContent = s.alarm_target ? t.time : "--:--";
+  el("next-day").textContent = t.day;
+  const cd = countdown(s.alarm_target);
+  el("countdown").classList.toggle("hidden", !cd);
+  if (cd) el("countdown-text").textContent = cd;
+
+  const pill = el("status-pill");
+  const cls = s.state === "ringing" ? "bad" : s.state === "vacation" || s.state === "dismissed" ? "warn"
+    : s.alarm_target ? "ok" : "mut";
+  pill.className = "pill " + cls;
+  el("status-text").textContent = STATE_LABEL[s.state] || s.state;
+
+  el("pill-vacation").className = "pill " + (s.vacation ? "warn" : "mut");
+  el("pill-echo").className = "pill " + (a.enabled ? (a.echo && a.echo.available ? "ok" : "warn") : "mut");
+  el("pill-echo").textContent = a.enabled ? (a.echo && a.echo.available ? "🔊 Echo bereit" : "🔇 Echo fehlt") : "🔇 Echo aus";
+
+  el("ringing-card").classList.toggle("hidden", s.state !== "ringing");
+
+  if (document.activeElement !== el("work-input") && s.work_time) el("work-input").value = s.work_time;
+  el("offset-label").textContent = s.offset_minutes;
+  el("echo-player").textContent = a.player || "nicht gesetzt";
+  el("echo-stored").textContent = a.stored_alarm || "keiner";
+  el("st-state").textContent = STATE_LABEL[s.state] || s.state;
+  el("st-mode").textContent = MODE_LABEL[s.mode] || s.mode;
+  el("st-work").textContent = s.work_time ? `${s.work_time} (${s.work_time_day || "?"})` : "nicht gesetzt";
+  el("st-alarm").textContent = s.alarm_time || "–";
+  el("st-offset").textContent = s.offset_minutes + " Min.";
+  el("st-default").textContent = s.default_alarm_time;
+  el("st-vacation").textContent = s.vacation ? "ja" : "nein";
+  el("st-test").textContent = s.test_mode ? ("aktiv bis " + (s.test_target || "").slice(11,16)) : "aus";
+  el("st-gate").textContent = a.gate_on ? "an" : "aus";
+
+  document.querySelectorAll("[data-mode]").forEach((b) =>
+    b.classList.toggle("active", b.dataset.mode === s.mode));
+  el("test-minutes").value = cfg.test_mode_minutes ?? 1;
+}
+
+function fillSettings() {
+  const c = DATA.settings;
+  el("s-default").value = c.default_alarm_time;
+  el("s-offset").value = c.offset_minutes;
+  el("s-loop").value = c.loop_interval_minutes;
+  el("s-maxring").value = c.max_ring_minutes;
+  el("s-testmin").value = c.test_mode_minutes;
+  el("s-reminder").value = c.reminder_time;
+  el("s-notifier").value = c.notifier || "";
+  el("s-reminder-alexa").checked = !!c.reminder_via_alexa;
+  el("s-reminder-vol").value = c.reminder_alexa_volume;
+  el("s-reminder-text").value = c.reminder_text || "";
+  el("s-turnoff").checked = !!c.turn_off_lights_on_stop;
+  el("s-keywords").value = c.vacation_keywords || "";
+  el("s-alexa").checked = !!c.alexa_enabled;
+  el("s-player").value = c.alexa_media_player || "";
+  el("s-helper").value = c.alexa_text_helper || "";
+  el("s-gate").value = c.alexa_enabled_boolean || "";
+  el("s-pre").value = c.pre_alarm_minutes;
+  el("s-alarm-name").value = c.alexa_alarm_name || "";
+  el("s-stopword").value = c.stop_word || "";
+  el("s-mqtt").checked = !!c.mqtt_enabled;
+  el("s-mqtt-host").value = c.mqtt_host || "";
+  el("s-mqtt-port").value = c.mqtt_port || 1883;
+  el("s-mqtt-user").value = c.mqtt_username || "";
+  renderPicklists();
+}
+
+function renderPicklists() {
+  const c = DATA.settings;
+  const lights = (ENTITIES.light || []).concat(ENTITIES.switch || []);
+  const chosenLights = new Set(c.alarm_lights || []);
+  el("s-lights").innerHTML = lights.map((e) => `
+    <label><input type="checkbox" data-light="${e.entity_id}" ${chosenLights.has(e.entity_id) ? "checked" : ""}>
+      <span>${e.name}<br><span class="en">${e.entity_id}</span></span></label>`).join("")
+    || '<label class="muted">keine Lampen gefunden</label>';
+  const cals = ENTITIES.calendar || [];
+  const chosenCals = new Set(c.vacation_calendars || []);
+  el("s-cals").innerHTML = cals.map((e) => `
+    <label><input type="checkbox" data-cal="${e.entity_id}" ${chosenCals.has(e.entity_id) ? "checked" : ""}>
+      <span>${e.name}<br><span class="en">${e.entity_id}</span></span></label>`).join("")
+    || '<label class="muted">keine Kalender gefunden</label>';
+  filterLists();
+}
+
+function filterLists() {
+  const lq = (el("s-light-search").value || "").toLowerCase();
+  const cq = (el("s-cal-search").value || "").toLowerCase();
+  el("s-lights").querySelectorAll("label").forEach((l) =>
+    (l.style.display = l.textContent.toLowerCase().includes(lq) ? "" : "none"));
+  el("s-cals").querySelectorAll("label").forEach((l) =>
+    (l.style.display = l.textContent.toLowerCase().includes(cq) ? "" : "none"));
+}
+
+function collectSettings() {
+  const lights = [...el("s-lights").querySelectorAll("input[data-light]:checked")].map((i) => i.dataset.light);
+  const cals = [...el("s-cals").querySelectorAll("input[data-cal]:checked")].map((i) => i.dataset.cal);
+  return {
+    default_alarm_time: el("s-default").value,
+    offset_minutes: Number(el("s-offset").value),
+    loop_interval_minutes: Number(el("s-loop").value),
+    max_ring_minutes: Number(el("s-maxring").value),
+    test_mode_minutes: Number(el("s-testmin").value),
+    reminder_time: el("s-reminder").value,
+    notifier: el("s-notifier").value.trim(),
+    reminder_via_alexa: el("s-reminder-alexa").checked,
+    reminder_alexa_volume: Number(el("s-reminder-vol").value),
+    reminder_text: el("s-reminder-text").value,
+    turn_off_lights_on_stop: el("s-turnoff").checked,
+    alarm_lights: lights,
+    vacation_calendars: cals,
+    vacation_keywords: el("s-keywords").value,
+    alexa_enabled: el("s-alexa").checked,
+    alexa_media_player: el("s-player").value.trim(),
+    alexa_text_helper: el("s-helper").value.trim(),
+    alexa_enabled_boolean: el("s-gate").value.trim(),
+    pre_alarm_minutes: Number(el("s-pre").value),
+    alexa_alarm_name: el("s-alarm-name").value.trim(),
+    stop_word: el("s-stopword").value,
+    mqtt_enabled: el("s-mqtt").checked,
+    mqtt_host: el("s-mqtt-host").value.trim(),
+    mqtt_port: Number(el("s-mqtt-port").value),
+    mqtt_username: el("s-mqtt-user").value.trim(),
+    mqtt_password: el("s-mqtt-pass").value,
+  };
+}
+
+async function load() {
+  try {
+    DATA = await api("/state");
+    render();
+    if (!Object.keys(ENTITIES).length) {
+      try { ENTITIES = (await api("/entities")).groups || {}; fillSettings(); } catch (e) {}
+    }
+  } catch (e) { toast("Verbindung fehlgeschlagen: " + e.message, true); }
+}
+
+async function loadHelp() {
+  try {
+    const h = await api("/help");
+    el("help-body").innerHTML = h.sections.map((s) =>
+      `<div style="margin-bottom:14px"><b>${s.title}</b><div class="hint">${s.text}</div></div>`).join("");
+  } catch (e) {}
+}
+
+// ------------------------------- wiring -------------------------------
+const QUICK = ["04:00","04:30","05:00","05:30","06:00","06:30","07:00"];
+el("quick-times").innerHTML = QUICK.map((t) => `<button class="small" data-work="${t}">${t}</button>`).join("");
+el("quick-times").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-work]"); if (!b) return;
+  el("work-input").value = b.dataset.work;
+  action({ action: "set_work_time", time: b.dataset.work + ":00" });
+});
+el("btn-set-work").onclick = () => action({ action: "set_work_time", time: el("work-input").value + ":00" });
+el("btn-clear-work").onclick = () => action({ action: "clear_work_time" });
+el("btn-stop").onclick = () => action({ action: "stop" });
+document.querySelectorAll("[data-mode]").forEach((b) => b.onclick = () => action({ action: "mode", mode: b.dataset.mode }));
+el("btn-alexa-sync").onclick = () => action({ action: "alexa_sync" });
+el("btn-alexa-set").onclick = () => action({ action: "alexa_set" });
+el("btn-alexa-clear").onclick = () => action({ action: "alexa_clear" });
+el("btn-test-start").onclick = () => action({ action: "test_start", minutes: Number(el("test-minutes").value) });
+el("btn-test-cancel").onclick = () => action({ action: "test_cancel" });
+el("btn-save").onclick = async () => {
+  try { const r = await api("/settings", collectSettings()); DATA.settings = r.settings; render(); toast("Einstellungen gespeichert"); }
+  catch (e) { toast("Fehler: " + e.message, true); }
+};
+el("btn-reload").onclick = () => { fillSettings(); toast("Verworfen"); };
+el("s-light-search").oninput = filterLists;
+el("s-cal-search").oninput = filterLists;
+el("btn-sim").onclick = async () => {
+  const at = el("sim-at").value, work = el("sim-work").value;
+  const q = new URLSearchParams();
+  if (at) q.set("at", at);
+  if (work) q.set("work", work);
+  try { el("sim-out").textContent = JSON.stringify(await api("/simulate?" + q.toString()), null, 2); }
+  catch (e) { el("sim-out").textContent = "Fehler: " + e.message; }
+};
+
+document.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => {
+  TAB = b.dataset.tab;
+  document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("active", x === b));
+  document.querySelectorAll("section[id^=tab-]").forEach((s) => s.classList.toggle("hidden", s.id !== "tab-" + TAB));
+  if (TAB === "help") loadHelp();
+  if (TAB === "settings" && DATA) fillSettings();
+});
+
+load();
+setInterval(load, 5000);
+</script>
+</body>
+</html>

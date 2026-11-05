@@ -1,0 +1,99 @@
+name: "DAC – Dynamic Alarm Clock"
+version: "1.0.0"
+slug: "dac"
+description: >-
+  Dynamischer Wecker für Home Assistant: stellt den Wecker automatisch aus dem
+  Arbeitsbeginn (minus Offset), weckt mit Licht und einem echten Wecker auf dem
+  Amazon Echo, kennt Urlaub/Feiertage aus dem Kalender und erinnert abends,
+  die Arbeitszeit zu setzen.
+url: "https://github.com/Dealwirth/DAC/tree/main/dac"
+arch:
+  - aarch64
+  - amd64
+  - armv7
+  - armhf
+init: false
+stage: stable
+startup: application
+boot: auto
+homeassistant: "2024.1.0"
+ingress: true
+ingress_port: 8099
+ingress_stream: true
+panel_icon: mdi:alarm
+panel_title: "DAC"
+panel_admin: false
+hassio_api: true
+hassio_role: default
+homeassistant_api: true
+timeout: 30
+tmpfs: true
+ports:
+  8099/tcp: null
+ports_description:
+  8099/tcp: "Weboberfläche (nur nötig, wenn Ingress nicht verwendet wird)"
+map:
+  - config:rw
+  - share:rw
+options:
+  ha_url: "http://supervisor/core"
+  ha_token: ""
+  default_alarm_time: "06:00"
+  offset_minutes: 60
+  loop_interval_minutes: 5
+  max_ring_minutes: 60
+  test_mode_minutes: 1
+  reminder_time: "21:00"
+  reminder_text: "⏰ DAC: Für morgen ist noch keine Arbeitszeit gesetzt – bitte den Wecker stellen. Sonst klingelt der Standard-Wecker um {alarm_time} Uhr."
+  notifier: ""
+  alarm_lights: []
+  vacation_calendars: []
+  vacation_keywords: "urlaub, urlaubstag, feiertag, ferien, freizeitausgleich, vacation, holiday"
+  turn_off_lights_on_stop: false
+  alexa_enabled: true
+  alexa_media_player: ""
+  alexa_text_helper: "input_text.gestellter_alexa_wecker"
+  alexa_enabled_boolean: "input_boolean.wecker_aktiv"
+  pre_alarm_minutes: 2
+  alexa_alarm_name: ""
+  stop_word: "Wecker aus"
+  reminder_via_alexa: true
+  reminder_alexa_volume: 15
+  mqtt_enabled: false
+  mqtt_host: "core-mosquitto"
+  mqtt_port: 1883
+  mqtt_username: ""
+  mqtt_password: ""
+  mqtt_discovery_prefix: "homeassistant"
+  log_level: "info"
+schema:
+  ha_url: "str"
+  ha_token: "password?"
+  default_alarm_time: "str"
+  offset_minutes: "int(0,600)"
+  loop_interval_minutes: "int(1,60)"
+  max_ring_minutes: "int(0,600)"
+  test_mode_minutes: "int(1,120)"
+  reminder_time: "str"
+  reminder_text: "str"
+  notifier: "str?"
+  alarm_lights: ["str?"]
+  vacation_calendars: ["str?"]
+  vacation_keywords: "str?"
+  turn_off_lights_on_stop: "bool"
+  alexa_enabled: "bool"
+  alexa_media_player: "str?"
+  alexa_text_helper: "str?"
+  alexa_enabled_boolean: "str?"
+  pre_alarm_minutes: "int(0,30)"
+  alexa_alarm_name: "str?"
+  stop_word: "str?"
+  reminder_via_alexa: "bool"
+  reminder_alexa_volume: "int(1,100)"
+  mqtt_enabled: "bool"
+  mqtt_host: "str?"
+  mqtt_port: "port?"
+  mqtt_username: "str?"
+  mqtt_password: "password?"
+  mqtt_discovery_prefix: "str?"
+  log_level: "list(debug|info|warning|error)"

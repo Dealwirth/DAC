@@ -1,7 +1,7 @@
 """Tests for the pure Alexa text logic and the AlexaBridge."""
 from __future__ import annotations
 
-from datetime import time
+from datetime import time, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -302,6 +302,7 @@ async def test_service_set_alarm_uses_explicit_time(
     assert "07:15" in helper_writes
 
 
+@freeze_time("2026-09-06 18:00:00")  # Berlin 20:00 – after the default alarm
 async def test_service_set_alarm_without_time_syncs(
     hass: HomeAssistant, coordinator, service_calls: list[tuple[str, str, dict]]
 ) -> None:
@@ -311,9 +312,12 @@ async def test_service_set_alarm_without_time_syncs(
     from tests.conftest import FakeCall
 
     coordinator._options[CONF_ALEXA_ENABLED] = True
-    # A scheduled alarm for today makes the sync place a device alarm.
-    coordinator._alarm_day = dt_util.now().date()
+    # A scheduled alarm for tomorrow makes the sync place a device alarm.
+    # The frozen evening time is required: during the day the fallback alarm is
+    # already "today" and the schedule would be empty until the cutoff passes.
+    coordinator._alarm_day = dt_util.now().date() + timedelta(days=1)
     coordinator._alarm_time = time(6, 0)
+    coordinator._alarm_target = dt_util.now().replace(hour=5, minute=0, second=0, microsecond=0) + timedelta(days=1)
 
     await coordinator.alexa.async_set_alarm(FakeCall({}))
 
